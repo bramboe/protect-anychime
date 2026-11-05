@@ -70,7 +70,7 @@ class TransferApiTests(unittest.TestCase):
         handler=server.Handler.__new__(server.Handler)
         handler.path=path
         handler.client_address=('172.30.32.2',123)
-        handler.headers={'X-Prototype-Test':'silent','Content-Length':str(len(body))}
+        handler.headers={'X-AnyChime-Request':'1','Content-Length':str(len(body))}
         handler.rfile=io.BytesIO(body)
         handler.respond=Mock()
         return handler
@@ -79,10 +79,10 @@ class TransferApiTests(unittest.TestCase):
         from unittest.mock import Mock,patch
         with tempfile.TemporaryDirectory() as directory,patch.object(server,'DATA_ROOT',Path(directory)), \
                 patch.object(server,'load_options',return_value={'speaker_entities':[]}), \
-                patch.object(server,'NATIVE') as native,patch.object(server,'ONBOARDING') as onboarding:
+                patch.object(server,'NATIVE') as native:
             native.thread.is_alive.return_value=False
             handler=self.handler('/api/migration/export');handler.do_POST()
-            native.stop.assert_called_once();onboarding.stop.assert_called_once()
+            native.stop.assert_called_once()
             self.assertEqual(handler.respond.call_args.args[0],200)
             self.assertEqual(handler.respond.call_args.args[2],'application/zip')
             self.assertIn('chimes.json',inspect_archive(handler.respond.call_args.args[1]))

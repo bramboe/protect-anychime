@@ -94,7 +94,7 @@ class UpgradeTests(unittest.TestCase):
 
 class MembershipHTTPTests(unittest.TestCase):
     def handler(self,body,path='/api/chimes/members',source='172.30.32.2'):
-        h=server.Handler.__new__(server.Handler);h.path=path;h.client_address=(source,1);raw=json.dumps(body).encode();h.headers={'Content-Length':str(len(raw)),'X-Prototype-Test':'silent'};h.rfile=io.BytesIO(raw);h.respond=Mock();return h
+        h=server.Handler.__new__(server.Handler);h.path=path;h.client_address=(source,1);raw=json.dumps(body).encode();h.headers={'Content-Length':str(len(raw)),'X-AnyChime-Request':'1'};h.rfile=io.BytesIO(raw);h.respond=Mock();return h
     def test_last_member_requires_explicit_confirmation_and_existing_protect_flow(self):
         with tempfile.TemporaryDirectory() as d:
             worker=NativeWorker();worker.registry=ChimeRegistry(d);worker.registry.transfer(A,None,ROWS)

@@ -1,6 +1,6 @@
 # Protect AnyChime project
 
-Source app version: 0.4.0. Slug: `unifi_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
+Source app version: 0.4.2. Slug: `unifi_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
 
 ## Chimes and speakers
 
@@ -14,7 +14,7 @@ Membership API: `POST /api/chimes/members`. Add/move uses a selected entity and 
 
 The deployment model remains a Home Assistant app with host networking, ingress/media port 48200 and owned per-device management forwarding. The existing NET_ADMIN/NET_RAW requirements and installation-specific console trust remain. Account settings stay in HA app configuration. Network portability beyond the live-tested HA OS installation remains a separate validation task.
 
-Verification uses fake HA/Protect request boundaries and synthetic media bytes. Tests cover stable membership keys, member moves/detachment, last-member refusal/confirmed removal, rollback on persistence failure, fixed membership across HA group changes, migration with open transitions, old backup import, and native identity/ringtone preservation. Source hygiene is checked with `tools/check_release.py`. No source commit is pushed automatically.
+Verification uses fake HA/Protect request boundaries and synthetic media bytes. Tests cover stable membership keys, member moves/detachment, last-member refusal/confirmed removal, rollback on persistence failure, fixed membership across HA group changes, migration with open transitions, old backup import, and native identity/ringtone preservation. Source hygiene is checked from the repository root with `python3 tools/check_release.py`. The root contains repository metadata and the MIT license; the installable app is in `unifi_anychime/`. No source commit is pushed automatically.
 
 ## Timing
 
@@ -27,3 +27,9 @@ Verification uses fake HA/Protect request boundaries and synthetic media bytes. 
 `manual_timing.py` stores the existing 0–500 ms values in private `latency-delays.json`. The UI exposes Save and an explicit Test at 10%. No editing, saving, loading, migration or refresh operation starts audio. A grouping integration may fan out a single effective request itself, and its outputs cannot then be independently compensated here. Announcement volume is integration-specific.
 
 Download release timing is not a common acoustic clock. Whether it performs as well as leading digital silence must be checked by the user on real speakers. Keep numeric settings, but retest them after upgrade. The local pre-simplification Git snapshot preserves the previous implementation for source comparison. Removed microphone/timestamp modules and generated-cache logic must not be reintroduced as hidden alternate playback routes.
+
+## Partial playback failures and security
+
+A failed state lookup, volume request or playback request affects only its effective output. Independent successful outputs continue their remaining repetitions. Failed members are excluded for the remainder of that ring, without retry or fallback playback; a new ring can try them again. A failed shared coordinator excludes the selected members represented by that request. Status reports `partial` when some outputs succeeded, with per-member outcomes and accepted-request counts. HA acceptance does not prove audible playback.
+
+All interface and administrative API requests require the actual Supervisor ingress peer, including read-only status and discovery. Loopback and forwarded-address headers cannot authorize access. Speaker media downloads remain intentionally separate from ingress authorization. The enforced AppArmor policy limits file writes and executable paths while retaining the network capabilities needed for virtual chimes. See [security details](../docs/SECURITY.md).

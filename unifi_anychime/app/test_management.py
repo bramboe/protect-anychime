@@ -194,7 +194,7 @@ class ManagementApiTests(unittest.TestCase):
     def handler(self, path, payload, peer='172.30.32.2'):
         handler=server.Handler.__new__(server.Handler)
         raw=json.dumps(payload).encode();handler.path=path;handler.client_address=(peer, 1)
-        handler.headers={'X-Prototype-Test':'silent','Content-Length':str(len(raw))}
+        handler.headers={'X-AnyChime-Request':'1','Content-Length':str(len(raw))}
         handler.rfile=io.BytesIO(raw);handler.respond=Mock()
         return handler
 
@@ -382,7 +382,7 @@ class ChimeTestActionsTests(unittest.TestCase):
         for source,confirmed in [('127.0.0.1',True),('10.23.45.50',True),('172.30.32.2',False)]:
             handler=server.Handler.__new__(server.Handler);handler.path='/api/chimes/test';handler.client_address=(source,123)
             raw=json.dumps({'key':'primary','confirmed':confirmed}).encode()
-            handler.headers={'X-Prototype-Test':'silent','Content-Length':str(len(raw)),'X-Forwarded-For':'172.30.32.2'}
+            handler.headers={'X-AnyChime-Request':'1','Content-Length':str(len(raw)),'X-Forwarded-For':'172.30.32.2'}
             handler.rfile=io.BytesIO(raw);handler.respond=Mock()
             with patch.object(server,'MANAGEMENT') as manager,patch.object(server,'load_options',return_value={'controller_ip':HOST}):handler.do_POST()
             self.assertIn(handler.respond.call_args.args[0],(400,403))

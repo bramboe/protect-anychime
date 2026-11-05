@@ -35,7 +35,7 @@ class GenericSpeakerTests(unittest.TestCase):
         transport = kwargs.pop("requester", FakeHA())
         return SpeakerBackend(OPTIONS, requester=transport, **kwargs), transport
 
-    def test_default_is_silent_and_preview_has_no_side_effects(self):
+    def test_default_is_silent_and_plan_has_no_side_effects(self):
         backend, fake = self.make()
         self.assertNotIn("announce", backend.plan()["body"])
         self.assertEqual(backend.plan()["volume"], 25)
@@ -193,7 +193,7 @@ class GenericSpeakerTests(unittest.TestCase):
             raise SpeakerError("Synthetic state failure")
         backend, _ = self.make(allow_playback=True, requester=failing_get)
         grant = backend.arm_once(confirmed=True)["approval_id"]
-        with self.assertRaisesRegex(SpeakerError, "Synthetic state"):
+        with self.assertRaisesRegex(SpeakerError, "No online"):
             backend.play_once(grant)
         with self.assertRaisesRegex(SpeakerError, "no matching"):
             backend.play_once(grant)

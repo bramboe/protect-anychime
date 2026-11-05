@@ -1,0 +1,63 @@
+#include <tunables/global>
+
+profile unifi_anychime flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Required for virtual interfaces, DHCP and app-owned forwarding rules.
+  capability net_admin,
+  capability net_raw,
+  capability net_bind_service,
+  network inet stream,
+  network inet dgram,
+  network inet raw,
+  network inet6 stream,
+  network inet6 dgram,
+  network packet raw,
+  network packet dgram,
+  network netlink raw,
+  network netlink dgram,
+  network unix stream,
+  network unix dgram,
+  signal (send,receive),
+
+  # Python, Docker init and the fixed subprocess tools. Children inherit policy.
+  /dev/init rix,
+  /sbin/docker-init rix,
+  /usr/local/bin/python{,3,3.13} rix,
+  /app/ r,
+  /app/** r,
+  /app/dhcp_hook.py ix,
+  /usr/local/lib/** mr,
+  /usr/lib/** mr,
+  /lib/** mr,
+  /{,usr/}{bin,sbin}/ip rix,
+  /{,usr/}{bin,sbin}/nft rix,
+  /{,usr/}{bin,sbin}/iptables{,-legacy,-nft,-save,-restore,-legacy-save,-legacy-restore,-nft-save,-nft-restore} rix,
+  /{,usr/}{bin,sbin}/xtables-{legacy,nft}-multi rix,
+  /usr/bin/openssl rix,
+  /usr/bin/ffprobe rix,
+  /bin/busybox rix,
+  /bin/sh rix,
+
+  # Installation data and temporary work only; application code is read-only.
+  /data/ rw,
+  /data/** rwk,
+  /tmp/ rw,
+  /tmp/** rwk,
+  /run/ r,
+  /run/xtables.lock rwk,
+  /etc/{resolv.conf,hosts,hostname,nsswitch.conf,services,protocols,passwd,group,localtime} r,
+  /etc/ld-musl-*.path r,
+  /etc/ssl/ r,
+  /etc/ssl/** r,
+  /proc/ r,
+  /proc/{cpuinfo,meminfo,filesystems,uptime,version} r,
+  /proc/[0-9]*/{cmdline,stat,status} r,
+  /proc/self/** r,
+  /proc/thread-self/** r,
+  /proc/net/** r,
+  /proc/sys/net/** r,
+  /proc/sys/crypto/** r,
+  /sys/ r,
+  /sys/** r,
+}

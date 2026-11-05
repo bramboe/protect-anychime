@@ -1,4 +1,4 @@
-"""HA ingress UI; previews stay silent, native-to-speaker forwarding is opt-in."""
+"""Authenticated HA ingress UI and Protect-controlled speaker forwarding."""
 import json
 import os
 import re
@@ -17,17 +17,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
 import mimetypes
-from bridge import replay
-from ucp import encode
 from runtime import NativeWorker
 from audio import SpeakerBackend, SpeakerError
-from onboarding import SpeakerOnboarding
 from announcement_sync import ALIGNMENT
 from manual_timing import ManualTiming
 
 ROOT = Path(__file__).resolve().parent
 NATIVE = NativeWorker()
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 DEFAULT_PORT = 48200
 SELECTION_LOCK = NATIVE.selection_lock
 DATA_ROOT = Path(os.environ.get("ANYCHIME_DATA_DIR", "/data"))
@@ -50,7 +47,6 @@ def load_options():
     return options
 
 
-ONBOARDING = SpeakerOnboarding(load_options)
 
 def automatically_adopt(key):
     if not NATIVE.selection_lock.acquire(blocking=False):return {'retry_later':True}
@@ -88,26 +84,13 @@ def remove_confirmed_chime(host,key):
     return MANAGEMENT.remove_virtual_chime(host,key,NATIVE)
 
 
-def preview(options, volume=25):
-    if type(volume) not in (int, float) or not 0 <= volume <= 100:
-        raise ValueError("Invalid volume.")
-    request = encode({"type": "request", "id": "silent-ha-prototype",
-                      "action": "playSpeaker"},
-                     {"track_no": 1, "volume": volume, "repeat": 1})
-    _, plans = replay(request)
-    result = {"audio_played": False, "ha_calls_sent": 0,
-              "tests_native_adoption": False, "protocol_replay_ok": True,
-              "bridge_plan": plans[0], "speaker_plan": None}
-    return result
-
-
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         # No ingress paths, URLs, request data or tokens in logs.
         pass
 
     def allowed(self):
-        return self.client_address[0] in ("172.30.32.2", "127.0.0.1", "::1")
+        return self.client_address[0] == "172.30.32.2"
 
     def respond(self, status, content, kind="application/json"):
         if isinstance(content, dict):
@@ -229,17 +212,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(200, connection.public_status(load_options()))
         if route == "/api/status":
             options = load_options()
-            return self.respond(200, {"version": VERSION, "build": "menu1",
+            return self.respond(200, {"version": VERSION, "build": "hardened1",
                 "mode": "protect_controlled", "native": NATIVE.status(),
                 "connection": connection.public_status(options),
                 "management": MANAGEMENT.status(options.get('controller_ip','')),
-                "migration": {"can_import": not (DATA_ROOT / "native").exists() and not (DATA_ROOT / "identities").exists()},
-                "onboarding": ONBOARDING.status()})
+                "migration": {"can_import": not (DATA_ROOT / "native").exists() and not (DATA_ROOT / "identities").exists()}})
         self.respond(404, {"error": "Not found"})
 
     def do_POST(self):
         if urlsplit(self.path).path == '/api/timing':
-            if self.client_address[0]!='172.30.32.2' or self.headers.get('X-Prototype-Test')!='silent':return self.respond(403,{'error':'Authenticated Home Assistant ingress required'})
+            if self.client_address[0]!='172.30.32.2' or self.headers.get('X-AnyChime-Request')!='1':return self.respond(403,{'error':'Authenticated Home Assistant ingress required'})
             try:
                 length=int(self.headers.get('Content-Length','0'))
                 if not 0<length<=8192:raise ValueError('Invalid timing request.')
@@ -256,8 +238,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond(200,{'saved':True,'audio_played':False})
             except (ValueError,OSError,SpeakerError) as error:return self.respond(400,{'error':str(error)})
 
-        if not self.allowed() or self.headers.get("X-Prototype-Test") != "silent":
-            return self.respond(403, {"error": "Silent ingress test required"})
+        if not self.allowed() or self.headers.get("X-AnyChime-Request") != "1":
+            return self.respond(403, {"error": "Authenticated Home Assistant ingress required"})
         route = urlsplit(self.path).path
         if route == "/api/products/link":
             if self.client_address[0] != "172.30.32.2":
@@ -316,7 +298,6 @@ class Handler(BaseHTTPRequestHandler):
                         for key in migration.SETTINGS:
                             if live.get(key):
                                 options[key] = live[key]
-                    ONBOARDING.stop()
                     NATIVE.stop()
                     if NATIVE.thread and NATIVE.thread.is_alive():
                         raise ValueError("The bridge is still stopping. Wait a moment and export again.")
@@ -327,7 +308,6 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("Select a migration backup smaller than 128 MB.")
                 if (DATA_ROOT / "native").exists() or (DATA_ROOT / "identities").exists():
                     raise ValueError("Import into a fresh installation before configuring its connection.")
-                ONBOARDING.stop()
                 NATIVE.stop()
                 if NATIVE.thread and NATIVE.thread.is_alive():
                     raise ValueError("The bridge is still stopping. Try the import again shortly.")
@@ -390,19 +370,7 @@ class Handler(BaseHTTPRequestHandler):
                     except OSError:pass
                 return self.respond(200,{'selected':registry.selected_entities(),'audio_played':False})
             except (ValueError,OSError,SpeakerError) as error:return self.respond(400,{'error':str(error) if isinstance(error,ValueError) else 'Could not save the chime change.'})
-        if route != "/api/preview":
-            return self.respond(404, {"error": "Not found"})
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= 4096:
-                raise ValueError("Invalid request.")
-            payload = json.loads(self.rfile.read(length))
-            if not isinstance(payload, dict):
-                raise ValueError("Invalid request.")
-            result = preview(load_options(), payload.get("volume", 25))
-            self.respond(200, result)
-        except (ValueError, TypeError, KeyError):
-            self.respond(400, {"error": "Check the volume (0–100) and app settings."})
+        return self.respond(404, {"error": "Not found"})
 
 
 def install_shutdown_handlers(server):
@@ -446,11 +414,10 @@ def run_server():
         options = MANAGEMENT.migrate_to_configuration(options, configuration.self_options)
         MANAGEMENT.configure(options)
         NATIVE.start(options)
-        print(f"Protect AnyChime {VERSION} (menu1): web interface on {port}; playback controlled by Protect.", flush=True)
+        print(f"Protect AnyChime {VERSION} (hardened1): web interface on {port}; playback controlled by Protect.", flush=True)
         server.serve_forever()
     finally:
         try:
-            ONBOARDING.stop()
             NATIVE.stop()
         finally:
             server.server_close()

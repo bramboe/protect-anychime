@@ -7,7 +7,7 @@ explicit user consent. No token is persisted, returned or logged.
 API reference: https://contributors.home-assistant.io/apps/guides/communication/
 Uses the generic media_player services; integrations may accept a call silently.
 """
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hmac
 import json
 import math
@@ -29,6 +29,10 @@ MEDIA_ANNOUNCE = 1048576
 
 class SpeakerError(RuntimeError):
     """An operational error whose text never includes tokens or media URLs."""
+
+    def __init__(self, message, *, member_results=None):
+        super().__init__(message)
+        self.member_results=member_results or {}
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -182,45 +186,65 @@ class SpeakerBackend:
             raise SpeakerError("Playback approval has expired.")
         volume=plan['volume']
         if volume==0:return {'ha_call_accepted':True,'mode':'muted','volume':0,'audio_played':False,'effective_requests':0}
-        # Inspect independently: an unavailable first member must not block the rest.
+        # A rejected member must not cancel independent outputs or their repeats.
+        failures={};skipped=[];players=[]
+        def failed(members, stage):
+            for member in members:failures[member]={'status':'failed','stage':stage}
         with ThreadPoolExecutor(max_workers=len(self._members)) as pool:
-            players=list(pool.map(self.check_entity,self._members))
-        active=[p for p in players if self._playable(p)]
-        if not active:raise SpeakerError('No online, active, unmuted speakers are available.')
-        for p in active:
-            if self._platforms.get(p['entity_id'])=='sonos' and not (p['supported_features'] or 0)&MEDIA_ANNOUNCE:
-                group=p['group_members'] or []
-                if any(q['entity_id'] in group and (q['supported_features'] or 0)&MEDIA_ANNOUNCE for q in active):
-                    raise SpeakerError('This Sonos music group mixes announcement capabilities. No audio was started.')
-        targets=[];seen=set();by_id={p['entity_id']:p for p in players}
+            pending={pool.submit(self.check_entity,e):e for e in self._members}
+            for future in as_completed(pending):
+                try:players.append(future.result())
+                except Exception:failed([pending[future]],'inspect')
+        by_id={p['entity_id']:p for p in players}
+        # Preserve configured order, including group coordinator selection.
+        active=[by_id[e] for e in self._members if e in by_id and self._playable(by_id[e])]
+        skipped=[p['entity_id'] for p in players if not self._playable(p)]
+        targets=[];seen={}
         for player in active:
-            entity=player['entity_id'];origin=entity;announce=bool((player['supported_features'] or 0)&MEDIA_ANNOUNCE)
+            origin=player['entity_id'];entity=origin
+            announce=bool((player['supported_features'] or 0)&MEDIA_ANNOUNCE)
             force_normal=self._platforms.get(entity)=='sonos' and not announce
             group=player['group_members'] or []
-            # Sonos AudioClip is per speaker. Normal Sonos playback follows its group.
             independent=self._platforms.get(entity)=='sonos' and announce
-            if not independent and len(group)>1 and entity in group:
-                signature=frozenset(group);leader=group[0]
-                reports=[p['group_members'] for p in players if p['entity_id'] in signature and p['group_members']]
-                if all(frozenset(g)==signature and g[0]==leader for g in reports):
-                    if signature in seen:continue
-                    seen.add(signature)
-                    player=by_id.get(leader) or self._inspect(leader)
-                    if not self._playable(player):continue
-                    entity=leader;announce=not force_normal and bool((player['supported_features'] or 0)&MEDIA_ANNOUNCE)
-            if any(t['entity']==entity for t in targets):continue
-            volume_targets=[]
-            volume_players=[q for q in active if q['entity_id'] in group] if len(group)>1 else [player]
-            if player not in volume_players:volume_players.append(player)
-            if not announce:
-              for volume_player in volume_players:
-                features=volume_player['supported_features']
-                if features is None or features&VOLUME_SET:volume_targets.append(volume_player['entity_id'])
-                elif volume_player['volume_level'] is None or volume_player['volume_level']>volume/100:
-                    raise SpeakerError('A selected speaker cannot set its volume safely. No audio was started.')
-            targets.append({'entity':entity,'announce':announce,'volume_targets':volume_targets,
-                'offset':self._delays.get(entity,self._delays.get(origin,0))})
-        if not targets:raise SpeakerError('The playback group coordinator is unavailable.')
+            if self._platforms.get(entity)=='sonos' and any(
+                    q['entity_id'] in group and bool((q['supported_features'] or 0)&MEDIA_ANNOUNCE)!=announce
+                    for q in active):
+                failed([origin],'mixed_capabilities');continue
+            contributors=[origin]
+            try:
+                if not independent and len(group)>1 and entity in group:
+                    signature=frozenset(group);leader=group[0]
+                    reports=[p['group_members'] for p in players if p['entity_id'] in signature and p['group_members']]
+                    if all(frozenset(g)==signature and g[0]==leader for g in reports):
+                        if signature in seen:continue
+                        contributors=[p['entity_id'] for p in active if p['entity_id'] in signature]
+                        # Mark even failed plans, so a sibling cannot retry the coordinator.
+                        seen[signature]=True
+                        player=by_id.get(leader) or self._inspect(leader)
+                        if not self._playable(player):
+                            skipped.extend(contributors);continue
+                        entity=leader;announce=not force_normal and bool((player['supported_features'] or 0)&MEDIA_ANNOUNCE)
+                existing=next((t for t in targets if t['entity']==entity),None)
+                if existing:
+                    existing['members'].extend(e for e in contributors if e not in existing['members']);continue
+                volume_targets=[]
+                volume_players=[q for q in active if q['entity_id'] in group] if len(group)>1 else [player]
+                if player not in volume_players:volume_players.append(player)
+                if not announce:
+                    for volume_player in volume_players:
+                        features=volume_player['supported_features']
+                        if features is None or features&VOLUME_SET:volume_targets.append(volume_player['entity_id'])
+                        elif volume_player['volume_level'] is None or volume_player['volume_level']>volume/100:
+                            raise SpeakerError('A selected speaker cannot set its volume safely. No audio was started.')
+                targets.append({'entity':entity,'members':contributors,'announce':announce,'volume_targets':volume_targets,
+                    'offset':self._delays.get(entity,self._delays.get(origin,0))})
+            except Exception:failed(contributors,'preflight')
+        if not targets:
+            if any(v['stage']=='mixed_capabilities' for v in failures.values()):
+                raise SpeakerError('This Sonos music group mixes announcement capabilities. No audio was started.',member_results=failures)
+            if any(v['stage']=='preflight' for v in failures.values()):
+                raise SpeakerError('A selected speaker cannot set its volume safely or its coordinator is unavailable. No audio was started.',member_results=failures)
+            raise SpeakerError('No online, active, unmuted speakers are available.',member_results=failures)
         urls,token=ALIGNMENT.register(self._media,{t['entity']:t['offset'] for t in targets})
         self.last_alignment_token=token
         def send(target):
@@ -231,17 +255,29 @@ class SpeakerBackend:
             body={'entity_id':entity,'media_content_type':'music','media_content_id':urls[entity]}
             if target['announce']:body.update(announce=True,extra={'volume':volume})
             return self._request('POST','/services/media_player/play_media',body)
-        try:
-            with ThreadPoolExecutor(max_workers=len(targets)) as pool:
-                futures=[pool.submit(send,target) for target in targets]
-                for future in futures:future.result()
-        except Exception:
-            ALIGNMENT.release(token);raise
+        accepted=[]
+        with ThreadPoolExecutor(max_workers=len(targets)) as pool:
+            pending={pool.submit(send,target):target for target in targets}
+            for future in as_completed(pending):
+                target=pending[future]
+                try:future.result();accepted.append(target)
+                except Exception:
+                    failed(target['members'],'request')
+                    ALIGNMENT.release(token)
+        if not accepted:raise SpeakerError('Home Assistant did not accept any speaker request. No automatic retry.',member_results=failures)
         return {'ha_call_accepted':True,'entity_id':self._entity,'volume':volume,
-            'mode':'announce' if all(t['announce'] for t in targets) else 'play_media',
-            'may_interrupt':any(not t['announce'] for t in targets),
+            'state':'partial' if failures else 'ha_accepted',
+            'member_results':{**{e:{'status':'accepted'} for t in accepted for e in t['members']},**failures},
+            'failed_members':list(failures),'skipped_members':list(dict.fromkeys(skipped)),
+            'accepted_requests':len(accepted),'failed_requests':len(targets)-len(accepted),
+            'mode':'announce' if all(t['announce'] for t in accepted) else 'play_media',
+            'may_interrupt':any(not t['announce'] for t in accepted),
             'effective_requests':len(targets),'download_alignment':token is not None,
             'acoustic_playback_verified':False}
+
+    def exclude_members(self, members):
+        """Narrow subsequent repetitions only; a new ring creates a fresh backend."""
+        self._members=tuple(e for e in self._members if e not in set(members))
 
     @staticmethod
     def _playable(player):

@@ -1,3 +1,14 @@
+# Changelog
+
+## 0.4.2
+
+- Continue repetitions on successful outputs when another speaker rejects a state, volume or playback request. Report partial outcomes and do not retry failed members within the same ring.
+- Remove the unused preview endpoint and disabled onboarding implementation; replace the prototype request header with an explicit app request marker.
+- Restrict read-only ingress endpoints to the actual Supervisor ingress peer, including denial of loopback requests.
+- Package an enforced AppArmor policy with bounded writes and executable paths; retain only the existing required network capabilities.
+- Add the MIT license, repository metadata, an installable app subfolder and repository installation instructions. Move internal verification/publication notes under docs.
+- Include the fixed-position menu and outside-click dismissal from 0.4.1.
+
 # 0.4.1 menu1
 
 - Keep the open chime menu fixed in the viewport while the page scrolls. Prevent polling from replacing its trigger underneath it, and clamp it to the visible viewport after resizing or zooming.

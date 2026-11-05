@@ -66,7 +66,7 @@ class TrackPlayer:
         return {'forwarding':'queued','effective_volume':volume}
 
     def _run(self, asset, volume, repeat):
-        completed=0
+        completed=0;accepted_requests=0;member_results={};had_failures=False
         state={'state':'failed','reason':'The speaker request failed. No automatic retry.'}
         try:
             with self.lock:
@@ -89,17 +89,25 @@ class TrackPlayer:
                 if result.get('ha_call_accepted') is not True:
                     raise SpeakerError('Home Assistant did not accept the audio request.')
                 completed+=1
-            state={'state':'ha_accepted' if completed==repeat else 'stopped',
+                accepted_requests+=result.get('accepted_requests',1)
+                member_results.update(result.get('member_results',{}))
+                failed=result.get('failed_members',[])
+                had_failures=had_failures or bool(failed)
+                if failed:backend.exclude_members(failed)
+
+            state={'state':'partial' if had_failures else ('ha_accepted' if completed==repeat else 'stopped'),
                    'track_no':asset['track_no'],'volume':volume,'repeat':repeat,
-                   'ha_calls_accepted':completed,'acoustic_playback_verified':False}
+                   'ha_calls_accepted':completed,'accepted_requests':accepted_requests,
+                   'member_results':member_results,'acoustic_playback_verified':False}
             if completed:
                 state.update(mode=result.get('mode'),may_interrupt=result.get('may_interrupt'),
                     download_alignment=result.get('download_alignment',False))
         except (ValueError,SpeakerError) as error:
-            state={'state':'failed','reason':str(error),'ha_calls_accepted':completed}
+            member_results.update(getattr(error,'member_results',{}))
+            state={'state':'partial' if completed else 'failed','reason':str(error),'ha_calls_accepted':completed,'accepted_requests':accepted_requests,'member_results':member_results}
         except Exception:
-            state={'state':'failed','reason':'The speaker request failed. No automatic retry.',
-                   'ha_calls_accepted':completed}
+            state={'state':'partial' if completed else 'failed','reason':'The speaker request failed. No automatic retry.',
+                   'ha_calls_accepted':completed,'accepted_requests':accepted_requests,'member_results':member_results}
         finally:
             with self.lock:
                 self.busy=False

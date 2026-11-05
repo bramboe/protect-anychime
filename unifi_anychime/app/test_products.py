@@ -76,7 +76,7 @@ class ProductEndpointTests(unittest.TestCase):
         handler=server.Handler.__new__(server.Handler)
         handler.path=route;handler.client_address=(source,123)
         raw=json.dumps(body or {}).encode()
-        handler.headers={'X-Prototype-Test':'silent','Content-Length':str(len(raw))}
+        handler.headers={'X-AnyChime-Request':'1','Content-Length':str(len(raw))}
         handler.rfile=io.BytesIO(raw);handler.respond=Mock()
         return handler
     def test_loopback_and_spoofed_headers_cannot_change_product_links(self):
@@ -92,8 +92,8 @@ class ProductEndpointTests(unittest.TestCase):
         import server
         handler=self.handler('/api/products/link',body={'entity_id':'media_player.example','product_device_id':'b'*32})
         inventory=[{'id':'b'*32}];rows=[{'entity_id':'media_player.example','device_id':'a'*32}]
-        with patch.object(server.speakers,'discover',return_value=([],inventory,rows)),patch.object(products,'save_link') as save,patch.object(server,'NATIVE') as native,patch.object(server,'ONBOARDING') as onboarding:
+        with patch.object(server.speakers,'discover',return_value=([],inventory,rows)),patch.object(products,'save_link') as save,patch.object(server,'NATIVE') as native:
             handler.do_POST()
         self.assertEqual(handler.respond.call_args.args[0],200)
         save.assert_called_once_with('media_player.example','b'*32,inventory,rows)
-        self.assertEqual(native.mock_calls,[]);self.assertEqual(onboarding.mock_calls,[])
+        self.assertEqual(native.mock_calls,[])

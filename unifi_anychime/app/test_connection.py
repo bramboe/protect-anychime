@@ -156,7 +156,7 @@ class ConnectionTests(unittest.TestCase):
         handler.client_address = ('172.30.32.2', 12345)
         handler.path = '/api/connection/certificate'
         body = json.dumps({'controller_ip': '10.23.45.1'}).encode()
-        handler.headers = {'X-Prototype-Test': 'silent', 'Content-Length': str(len(body))}
+        handler.headers = {'X-AnyChime-Request': '1', 'Content-Length': str(len(body))}
         handler.rfile = io.BytesIO(body)
         handler.respond = Mock()
         with patch('server.load_options', return_value={}), patch('server.CERTIFICATES') as manager:
@@ -186,7 +186,7 @@ class ConnectionTests(unittest.TestCase):
                 with self.subTest(peer=peer,route=route):
                     handler=server.Handler.__new__(server.Handler)
                     handler.client_address=(peer,1234);handler.path=route
-                    handler.headers={'X-Prototype-Test':'silent','Content-Length':'2',
+                    handler.headers={'X-AnyChime-Request':'1','Content-Length':'2',
                         'X-Forwarded-For':'172.30.32.2'}
                     handler.rfile=io.BytesIO(b'{}');handler.respond=Mock()
                     with patch('server.CERTIFICATES') as manager,patch('server.load_options') as options:

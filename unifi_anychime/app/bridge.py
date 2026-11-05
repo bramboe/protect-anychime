@@ -1,4 +1,4 @@
-"""Silent protocol prototype; no sockets, HA requests, audio or adoption writes."""
+"""Pure Protect protocol device state; no sockets or HA requests."""
 import argparse
 import json
 import re
