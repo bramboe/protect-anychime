@@ -1,0 +1,11 @@
+.git
+**/__pycache__
+**/*.pyc
+**/.DS_Store
+**/*.pem
+**/*.key
+**/*.log
+**/.env*
+data
+backups
+app/test_*.py

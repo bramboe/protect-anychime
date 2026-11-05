@@ -1,0 +1,16 @@
+{
+  "configuration": {
+    "protect_username": {
+      "name": "Protect username",
+      "description": "Local UniFi username with Protect Full Management access. Needed to manage, test or automatically adopt virtual chimes. Leave both account fields empty to disable management."
+    },
+    "protect_password": {
+      "name": "Protect password",
+      "description": "Password for the local UniFi user. The console address is detected automatically. Credentials are included in Home Assistant app backups."
+    },
+    "auto_adopt_chimes": {
+      "name": "Automatically adopt chimes in Protect",
+      "description": "Disabled by default. Uses your configured local Protect account to adopt only this app\u2019s new virtual chimes. After adoption, configure doorbell pairing, ringtone, volume and repeats yourself in the Protect app."
+    }
+  }
+}
