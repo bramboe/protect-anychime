@@ -1,5 +1,4 @@
 """Persistent entity-to-chime identities. Active identities remain stable; confirmed removals are purged."""
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -7,14 +6,13 @@ import re
 import secrets
 import shutil
 import threading
-from chime_layout import ChimeLayouts
+from chime_migration import ChimeMigration
 
 
 class ChimeRegistry:
     def __init__(self, directory='/data'):
         self.directory = Path(directory)
         self.path = self.directory / 'chimes.json'
-        self.layouts=ChimeLayouts(self.directory/'chime-layout.json')
         self.lock = threading.RLock()
         self.entries = json.loads(self.path.read_text()) if self.path.exists() else []
         if not isinstance(self.entries, list):
@@ -27,6 +25,12 @@ class ChimeRegistry:
             keys.add(entry['key'])
         if not self.entries:
             self.entries = [{'key':'primary', 'entity_id':None, 'name':'Protect AnyChime', 'active':False}]
+        for entry in self.entries:
+            entry['members']=entry.get('members') or ([entry['entity_id']] if entry.get('entity_id') else [])
+            self._validate_entities(entry['members'])
+        self.migration=ChimeMigration(self.directory)
+        if self.migration.prepare(self.entries):self._save()
+        self.migration.commit()
 
     def _save(self):
         if getattr(self,'_dry_run',False):
@@ -48,81 +52,109 @@ class ChimeRegistry:
             return list(dict.fromkeys(entity for entry in self.entries if entry['active']
                 for entity in entry.get('members', [entry['entity_id']]) if entity))
 
-    def sync(self, entities, rows=None, *, user_change=True, layout_commit=False, preserve_key=None):
-        from speakers import visual_groups
+    @staticmethod
+    def _validate_entities(entities):
         if (not isinstance(entities,list) or len(entities)>16
-                or any(not isinstance(e,str) or not re.fullmatch(r'media_player\.[a-z0-9_]+',e) for e in entities)
-                or len(set(entities))!=len(entities)):
-            raise ValueError('Select up to 16 distinct Home Assistant media players')
-        if self.layouts.pending and not layout_commit:
-            if not user_change:return self.snapshot()
-            raise ValueError('Resume the pending chime change before changing speakers.')
-        metadata_known=rows is not None
-        rows = self.layouts.decorate(rows or [])
-        available={r['entity_id']:r.get('available',True) is True for r in rows}
-        names = {r['entity_id']:str(r['name'])[:100] for r in rows}
-        platforms = {r['entity_id']:str(r.get('integration') or '')[:80] for r in rows}
-        groups = visual_groups(rows)
-        known = {entity for group in groups for entity in group['members']}
-        groups += [{'members':[entity]} for entity in entities if entity not in known]
-        chosen = set(entities)
-        desired = [g['members'] for g in groups if chosen.intersection(g['members'])]
-        if len({e for group in desired for e in group}) > 16:
-            raise ValueError('Select groups containing at most 16 speakers.')
-        with self.lock:
-            before = json.dumps(self.entries,sort_keys=True)
-            used = set()
-            owners = []
-            for members in desired:
-                leader = members[0]
-                candidates = [e for e in self.entries if e['key'] not in used and e.get('removal_source')!='protect']
-                owner = next((e for e in candidates if layout_commit and e['key']==preserve_key
-                    and e['active'] and set(e.get('members',[e['entity_id']])).issubset(members)),None)
-                if owner is None:
-                    owner = next((e for e in candidates if e['key']=='primary' and e['entity_id'] in members),None)
-                if owner is None:
-                    owner = next((e for e in candidates if set(e.get('members',[]))==set(members)),None)
-                if owner is None:
-                    owner = next((e for e in candidates if e['entity_id']==leader),None)
-                if owner is None:
-                    owner = next((e for e in candidates if e['entity_id'] in members),None)
-                if owner is None:
-                    owner = next((e for e in candidates if e['key']=='primary' and e['entity_id'] is None),None)
-                    if owner is not None:
-                        owner['entity_id']=leader
-                    else:
-                        owner={'key':hashlib.sha256(leader.encode()).hexdigest()[:24], 'entity_id':leader}
-                        self.entries.append(owner)
-                used.add(owner['key'])
-                owner.update(members=list(members),playback_entity=leader,active=True,
-                    name=(' + '.join(names.get(e,e.split('.',1)[1].replace('_',' ').title()) for e in members))[:100])
-                owner['speaker_available']=available.get(leader,False) if metadata_known else owner.get('speaker_available',True)
-                if metadata_known:
-                    owner['chime_only_group']=any(r.get('chime_only_group') for r in rows if r['entity_id'] in members)
-                    owner['member_platforms']={e:platforms.get(e,'') for e in members}
-                    owner['member_device_ids']={e:next((r.get('ha_device_id','') for r in rows if r['entity_id']==e),'') for e in members}
-                owner.pop('removal_source',None);owner.pop('superseded_by',None)
-                if user_change:
-                    owner.pop('removal_pending',None)
-                owners.append(owner)
-            for entry in self.entries:
-                if entry['key'] in used:
-                    continue
-                entry['active']=False
-                replacement=next((e for e in owners if entry['entity_id'] in e['members']),None)
-                if replacement:
-                    entry['superseded_by']=replacement['key']
-            if json.dumps(self.entries,sort_keys=True)!=before or not self.path.exists():
-                try:self._save()
-                except Exception:
-                    self.entries=json.loads(before)
-                    raise
-            return self.snapshot()
+                or any(not isinstance(e,str) or not re.fullmatch(r'media_player\.[a-z0-9_]+',e) for e in entities) or len(set(entities))!=len(entities)):
+            raise ValueError('Choose up to 16 distinct speakers.')
 
-    def plan(self, entities, rows=None):
+    @staticmethod
+    def _editable(entry):
+        if entry.get('migration_hold') or entry.get('removal_pending'):
+            raise ValueError('Finish the pending removal or migration before changing this chime.')
+
+    def _metadata(self,entry,rows):
+        lookup={r['entity_id']:r for r in rows};group=entry['members']
+        entry['entity_id']=group[0] if group else None
+        entry['playback_entity']=entry['entity_id']
+        if group:
+            entry['name']=' + '.join(lookup.get(e,{}).get('name',e.split('.',1)[1].replace('_',' ').title()) for e in group)[:100]
+            entry['speaker_available']=any(lookup.get(e,{}).get('available',False) for e in group)
+            entry['member_platforms']={e:lookup.get(e,{}).get('integration',entry.get('member_platforms',{}).get(e,'')) for e in group}
+            entry['member_device_ids']={e:lookup.get(e,{}).get('ha_device_id',entry.get('member_device_ids',{}).get(e,'')) for e in group}
+        entry.pop('chime_only_group',None)
+
+    def _new(self,entity):
+        owner=next((e for e in self.entries if not e['active'] and e.get('entity_id')==entity and not e.get('removal_source') and not e.get('removal_pending') and not e.get('migration_hold')),None)
+        if owner is None:owner=next((e for e in self.entries if e['key']=='primary' and e.get('entity_id') is None),None)
+        if owner is None:
+            owner={'key':secrets.token_hex(12)};self.entries.append(owner)
+        owner.update(entity_id=entity,members=[entity],active=True)
+        return owner
+
+    def _atomic(self,mutate):
+        before=self.snapshot()
+        try:
+            result=mutate()
+            if self.entries!=before or not self.path.exists():self._save()
+            return result
+        except Exception:
+            self.entries=before;raise
+
+    def sync(self,entities,rows=None,*,user_change=True):
+        """Selection compatibility: retain sets; new players each create one chime."""
+        self._validate_entities(entities)
+        with self.lock:
+            def update():
+                selected=set(entities)
+                owned={m for e in self.entries if e['active'] for m in e['members']}
+                if user_change:
+                    for entry in self.entries:
+                        if not entry['active']:continue
+                        desired=[m for m in entry['members'] if m in selected]
+                        if desired!=entry['members']:
+                            self._editable(entry);entry['active']=bool(desired)
+                            if desired:entry['members']=desired
+                    for entity in entities:
+                        if entity not in owned:self._new(entity)
+                if rows is not None:
+                    for entry in self.entries:
+                        if entry['active'] and not entry.get('migration_hold'):self._metadata(entry,rows)
+                return self.snapshot()
+            return self._atomic(update)
+
+    def transfer(self,entity,target_key,rows):
+        """Add/move a member in one registry write; never delete a Protect chime."""
+        self._validate_entities([entity])
+        if target_key is not None and (not isinstance(target_key,str) or not re.fullmatch(r'primary|[a-f0-9]{24}',target_key)):
+            raise ValueError('Choose a valid destination chime.')
+        with self.lock:
+            row=next((r for r in rows if r['entity_id']==entity),None)
+            if not row or not row.get('available') or row.get('excluded') or row.get('supported') is False:
+                raise ValueError('Only an online supported speaker can be added or moved.')
+            source=next((e for e in self.entries if e['active'] and entity in e['members']),None)
+            target=next((e for e in self.entries if e['active'] and e['key']==target_key),None) if target_key else None
+            if target_key and target is None:raise ValueError('The destination chime no longer exists.')
+            if source and target and source['key']==target['key']:return self.snapshot()
+            if source:
+                self._editable(source)
+                if len(source['members'])==1:
+                    raise ValueError('This is the last speaker in its chime. Remove that chime through the confirmed Protect flow first, then add the speaker to its destination.')
+            if target:self._editable(target)
+            if not source and len(self.selected_entities())>=16:raise ValueError('Choose up to 16 speakers.')
+            def update():
+                if source:source['members'].remove(entity)
+                destination=target or self._new(entity)
+                if entity not in destination['members']:destination['members'].append(entity)
+                if source:self._metadata(source,rows)
+                self._metadata(destination,rows)
+                return self.snapshot()
+            return self._atomic(update)
+
+    def detach(self,key,entity,rows):
+        with self.lock:
+            entry=next((e for e in self.entries if e['key']==key and e['active']),None)
+            if not entry or entity not in entry['members']:raise ValueError('The speaker is no longer in this chime.')
+            self._editable(entry)
+            if len(entry['members'])==1:raise ValueError('Confirm removal of the last speaker through Protect.')
+            def update():
+                entry['members'].remove(entity);self._metadata(entry,rows);return self.snapshot()
+            return self._atomic(update)
+
+    def plan(self,entities,rows=None):
         clone=object.__new__(ChimeRegistry)
         clone.directory=self.directory;clone.path=self.path;clone.lock=threading.RLock()
-        clone.entries=self.snapshot();clone._dry_run=True;clone.layouts=self.layouts
+        clone.entries=self.snapshot();clone._dry_run=True;clone.migration=self.migration
         return clone.sync(entities,rows)
 
     def mark_removal_pending(self, key):

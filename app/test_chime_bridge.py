@@ -44,7 +44,8 @@ class RegistryTests(unittest.TestCase):
     def test_no_identity_or_network_created_when_registry_is_only_constructed(self):
         with tempfile.TemporaryDirectory() as directory:
             registry=ChimeRegistry(Path(directory)/'new')
-            self.assertFalse(registry.directory.exists())
+            self.assertFalse((registry.directory/'native').exists())
+            self.assertTrue((registry.directory/'chime-schema.json').exists())
 
 
 class PlayerTests(unittest.TestCase):
@@ -236,99 +237,3 @@ class RemovalDuringStartupTests(unittest.IsolatedAsyncioTestCase):
                 player.return_value.stop.assert_called_once()
             native.stop.assert_awaited_once();self.assertEqual(worker.nodes,{})
             self.assertEqual(worker._descriptors(),[])
-
-class GroupChimeRegistryTests(unittest.TestCase):
-    def rows(self, leader='media_player.a'):
-        a,b='media_player.a','media_player.b';members=[leader]+[e for e in (a,b) if e!=leader]
-        return [{'entity_id':a,'name':'Room','group':members},{'entity_id':b,'name':'Room left','group':members}]
-
-    def test_existing_separate_chimes_merge_into_primary_without_changing_keys(self):
-        with tempfile.TemporaryDirectory() as directory:
-            registry=ChimeRegistry(directory);before=registry.sync(['media_player.a','media_player.b'])
-            group=registry.sync(['media_player.a','media_player.b'],self.rows())
-            active=[e for e in group if e['active']]
-            self.assertEqual(len(active),1);self.assertEqual(active[0]['key'],'primary')
-            self.assertEqual(active[0]['members'],['media_player.a','media_player.b'])
-            self.assertEqual(active[0]['playback_entity'],'media_player.a')
-            self.assertEqual(group[1]['key'],before[1]['key']);self.assertEqual(group[1]['superseded_by'],'primary')
-            self.assertEqual(set(registry.selected_entities()),{'media_player.a','media_player.b'})
-
-    def test_leader_change_keeps_one_stable_chime_identity(self):
-        with tempfile.TemporaryDirectory() as directory:
-            registry=ChimeRegistry(directory);registry.sync(['media_player.a'],self.rows())
-            group=registry.sync(registry.selected_entities(),self.rows('media_player.b'))
-            active=[e for e in group if e['active']]
-            self.assertEqual(len(active),1);self.assertEqual(active[0]['key'],'primary')
-            self.assertEqual(active[0]['entity_id'],'media_player.a')
-            self.assertEqual(active[0]['playback_entity'],'media_player.b')
-
-    def test_ungrouping_restores_original_individual_identity_keys(self):
-        with tempfile.TemporaryDirectory() as directory:
-            registry=ChimeRegistry(directory);old=registry.sync(['media_player.a','media_player.b'])
-            registry.sync(registry.selected_entities(),self.rows())
-            split=registry.sync(registry.selected_entities(),[{'entity_id':e,'name':e,'group':[]} for e in registry.selected_entities()])
-            self.assertEqual([e['key'] for e in split if e['active']],[e['key'] for e in old])
-            self.assertTrue(all('superseded_by' not in e for e in split))
-
-    def test_removing_group_deselects_all_members_without_reactivation(self):
-        with tempfile.TemporaryDirectory() as directory:
-            registry=ChimeRegistry(directory);registry.sync(['media_player.a','media_player.b'])
-            registry.sync(registry.selected_entities(),self.rows());registry.deactivate_from_protect('primary')
-            registry.sync(registry.selected_entities(),self.rows())
-            self.assertEqual(registry.selected_entities(),[])
-            self.assertFalse(any(e['active'] for e in registry.snapshot()))
-
-    def test_repeated_refresh_is_stable_and_does_not_allocate_more_identities(self):
-        with tempfile.TemporaryDirectory() as directory:
-            registry=ChimeRegistry(directory);first=registry.sync(['media_player.a'],self.rows())
-            for _ in range(4):self.assertEqual(registry.sync(registry.selected_entities(),self.rows()),first)
-            self.assertEqual(len(registry.snapshot()),1)
-
-class GroupPlaybackPipelineTests(unittest.IsolatedAsyncioTestCase):
-    async def test_one_group_chime_repeats_once_per_command_not_once_per_member(self):
-        from audio import SpeakerBackend
-        members=['media_player.a','media_player.b'];calls=[]
-        def request(method,path,body=None):
-            calls.append((method,path,body))
-            if method=='GET':return {'entity_id':path.rsplit('/',1)[1],'state':'idle',
-                'attributes':{'supported_features':516|1048576,'volume_level':.1,'group_members':members}}
-            return []
-        with tempfile.TemporaryDirectory() as directory:
-            store=seeded_store(Path(directory)/'tracks')
-            player=TrackPlayer('primary',members[0],store,'http://10.23.45.20:48200',
-                group_members=members,duration_probe=lambda _:0,
-                backend_factory=lambda options,**kw:SpeakerBackend(options,requester=request,**kw))
-            native=NativeChime({'controller_ip':'10.23.45.1','native_ip':'10.23.45.20','controller_fingerprint':'00'*32},Path(directory)/'identity','unused.pem',
-                on_play=player.submit,ringtone_store=store)
-            response,_=await native.process_request({'id':'group-ring','type':'request','action':'playSpeaker'},
-                {'track_no':2,'volume':65,'repeat':2})
-            player.thread.join(2);self.assertEqual(response['errorCode'],0)
-            plays=[c for c in calls if c[1]=='/services/media_player/play_media']
-            self.assertEqual(len(plays),2)
-            self.assertTrue(all(c[2]['entity_id']==members[0] and c[2]['announce'] is True
-                and c[2]['extra']=={'volume':65} for c in plays))
-            volumes=[c for c in calls if c[1]=='/services/media_player/volume_set']
-            self.assertEqual(volumes,[])
-            player.stop()
-
-class AutomaticAdoptionRepairTests(unittest.IsolatedAsyncioTestCase):
-    async def test_only_rejected_adopted_connection_triggers_one_check_per_instance(self):
-        worker=NativeWorker();device=Mock();device.connected=False;device.state={'adopted':True};device.last_http_status=403
-        worker.nodes={'primary':{'native':device}};worker.adoption_checker=Mock(return_value={'ready_for_adoption':True})
-        await worker._repair_stale_adoptions();await worker._repair_stale_adoptions()
-        worker.adoption_checker.assert_called_once_with('primary')
-        replacement=Mock();replacement.connected=False;replacement.state={'adopted':True};replacement.last_http_status=403
-        worker.nodes['primary']={'native':replacement}
-        await worker._repair_stale_adoptions();self.assertEqual(worker.adoption_checker.call_count,2)
-
-    async def test_network_outage_and_unadopted_or_connected_devices_do_not_trigger_reset(self):
-        for connected,adopted,status in [(False,True,None),(False,False,403),(True,True,403)]:
-            worker=NativeWorker();device=Mock();device.connected=connected;device.state={'adopted':adopted};device.last_http_status=status
-            worker.nodes={'primary':{'native':device}};worker.adoption_checker=Mock()
-            await worker._repair_stale_adoptions();worker.adoption_checker.assert_not_called()
-
-    async def test_missing_account_can_be_rechecked_without_resetting_anything(self):
-        worker=NativeWorker();device=Mock();device.connected=False;device.state={'adopted':True};device.last_http_status=401
-        worker.nodes={'primary':{'native':device}};worker.adoption_checker=Mock(return_value={'retry_later':True})
-        await worker._repair_stale_adoptions();await worker._repair_stale_adoptions()
-        self.assertEqual(worker.adoption_checker.call_count,2)

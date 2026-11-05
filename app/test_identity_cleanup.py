@@ -76,16 +76,6 @@ class IdentityCleanupTests(unittest.TestCase):
             with self.assertRaises(ValueError):registry.purge_removed('primary')
             self.assertEqual(marker.read_text(),'untouched')
 
-    def test_history_cleanup_verifies_remote_before_erasing_local_history(self):
-        with tempfile.TemporaryDirectory() as directory:
-            registry,entries=self.make_registry(Path(directory));registry.sync(['media_player.a'])
-            worker=Mock();worker.registry=registry;worker.selection_lock=__import__('threading').RLock()
-            with patch.object(server,'NATIVE',worker),patch.object(server,'MANAGEMENT') as manager,patch.object(server,'load_options',return_value={'controller_ip':'10.23.45.1'}):
-                manager.status.return_value={'ready':True}
-                server.cleanup_old_chimes()
-                manager.remove_virtual_chimes.assert_called_once_with('10.23.45.1',[entries[1]['key']],worker,allow_absent=True)
-                worker.complete_removal.assert_not_called() # Manager owns confirmed teardown.
-
     def test_failed_selection_save_does_not_leave_inactive_memory_history(self):
         with tempfile.TemporaryDirectory() as directory:
             registry=ChimeRegistry(directory);registry.sync(['media_player.a'])

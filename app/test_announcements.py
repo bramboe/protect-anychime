@@ -34,12 +34,12 @@ class AnnouncementTests(unittest.TestCase):
         backend,calls=self.backend()
         result=self.ring(backend)
         posts=[c for c in calls if c[0]=='POST']
-        self.assertEqual(len(posts),1)
+        self.assertEqual(len(posts),2)
         self.assertEqual(posts[0][1],'/services/media_player/play_media')
-        self.assertEqual(posts[0][2]['entity_id'],MEMBERS)
+        self.assertEqual({p[2]['entity_id'] for p in posts},set(MEMBERS))
         self.assertEqual(posts[0][2]['extra'],{'volume':67})
         self.assertTrue(posts[0][2]['announce'])
-        self.assertEqual(result['mode'],'group_announce')
+        self.assertEqual(result['mode'],'announce')
         self.assertFalse(result['may_interrupt'])
 
     def test_sonos_single_uses_clip_volume_and_does_not_change_music_volume(self):
@@ -71,15 +71,17 @@ class AnnouncementTests(unittest.TestCase):
     def test_failed_announcement_never_retries_with_destructive_plain_playback(self):
         backend,calls=self.backend(fail=True)
         with self.assertRaises(SpeakerError):self.ring(backend)
-        self.assertEqual(sum(c[0]=='POST' for c in calls),1)
-        self.assertTrue(calls[-1][2]['announce'])
+        self.assertEqual(sum(c[0]=='POST' for c in calls),2)
+        self.assertTrue(all(c[2].get('announce') for c in calls if c[0]=='POST'))
 
     def test_platform_metadata_reaches_group_mapping_and_player_options(self):
         rows=discover(Mock(return_value=[{'entity_id':e,'name':e,'state':'playing','features':516|MEDIA_ANNOUNCE,
             'integration':'sonos','group':MEMBERS} for e in MEMBERS]))
         with tempfile.TemporaryDirectory() as directory:
             registry=ChimeRegistry(directory)
-            entry=next(e for e in registry.sync(MEMBERS,rows) if e['active'])
+            registry.transfer(MEMBERS[0],None,rows)
+            registry.transfer(MEMBERS[1],'primary',rows)
+            entry=next(e for e in registry.snapshot() if e['active'])
             self.assertEqual(entry['member_platforms'],{e:'sonos' for e in MEMBERS})
             factory=Mock();factory.return_value.play_once.return_value={'ha_call_accepted':True,'mode':'group_announce','may_interrupt':False}
             factory.return_value.arm_once.return_value={'approval_id':'test-grant'}

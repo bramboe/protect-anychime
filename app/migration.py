@@ -11,7 +11,7 @@ import zipfile
 
 MAX_ARCHIVE=128*1024*1024
 MAX_TOTAL=256*1024*1024
-ROOT_FILES={'managed-settings.json','speakers.json','chimes.json','chime-layout.json','product-links.json','latency-calibration.json','latency-delays.json'}
+ROOT_FILES={'managed-settings.json','speakers.json','chimes.json','product-links.json','latency-delays.json','chime-schema.json'}
 DIRECTORIES={'native','identities','ringtones','network'}
 SETTINGS={'native_ip','controller_ip','controller_fingerprint','controller_certificate','unifi_compatibility_profile'}
 
@@ -22,6 +22,12 @@ def allowed(name):
             and '\\' not in name and '\x00' not in name and path.as_posix()==name
             and (name in ROOT_FILES or (len(path.parts)>1 and path.parts[0] in DIRECTORIES))
             and path.name not in {'process.json','udhcpc.pid','lock'} and not path.name.endswith('.tmp'))
+
+
+def obsolete(name):
+    path=PurePosixPath(name)
+    safe=bool(path.parts) and not path.is_absolute() and '..' not in path.parts and '\\' not in name and path.as_posix()==name
+    return safe and (name in {'chime-layout.json','latency-calibration.json','calibration-click.mp3'} or path.parts[0]=='latency-cache')
 
 
 def export_state(directory, options, selected):
@@ -74,9 +80,9 @@ def inspect_archive(raw):
                 raise ValueError('The migration backup is too large.')
             for info in infos:
                 mode=info.external_attr>>16
-                if stat.S_ISLNK(mode) or info.is_dir() or info.file_size>4*1024*1024:
+                if stat.S_ISLNK(mode) or info.is_dir() or (info.file_size>4*1024*1024 and not obsolete(info.filename)):
                     raise ValueError('The migration backup contains an invalid file.')
-                if info.filename!='migration.json' and not allowed(info.filename):
+                if info.filename!='migration.json' and not allowed(info.filename) and not obsolete(info.filename):
                     raise ValueError('The migration backup contains an unexpected path.')
                 files[info.filename]=archive.read(info)
     except (zipfile.BadZipFile, RuntimeError, OSError, KeyError):
@@ -96,7 +102,18 @@ def inspect_archive(raw):
             raise ValueError('The migration speaker selection is invalid.')
     except (KeyError,TypeError,json.JSONDecodeError):
         raise ValueError('The migration backup is incomplete.') from None
-    return files
+    legacy=json.loads(files.get('chime-layout.json',b'{}'))
+    pending=legacy.get('pending') if isinstance(legacy,dict) else None
+    if pending:
+        if not isinstance(pending,dict) or not isinstance(pending.get('members'),list) or not isinstance(pending.get('keys'),list):
+            raise ValueError('Invalid unfinished chime change in backup.')
+        entries=json.loads(files['chimes.json'])
+        for entry in entries:
+            if entry['key'] in pending['keys'] or set(pending['members']).intersection(entry.get('members',[entry.get('entity_id')])):
+                entry['migration_hold']=True
+        files['chimes.json']=json.dumps(entries).encode()
+        files['chime-schema.json']=json.dumps({'version':1,'review_required':True}).encode()
+    return {name:value for name,value in files.items() if not obsolete(name)}
 
 
 def import_state(raw, directory):

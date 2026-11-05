@@ -1,3 +1,15 @@
+# 0.4.0 sets1
+
+- Make each chime a fixed, user-chosen speaker set independent of Home Assistant music groups. Keep existing keys, native identities, adoption, pairing and ringtone storage during migration and member edits.
+- Add drag/drop, +, per-chime Add speaker, keyboard pickup/drop and member ×. Adds, non-last removals and moves are atomic registry changes. Moving a last member is refused until its chime is explicitly removed through the confirmed Protect flow; no empty active identity is left behind.
+- Replace automatic group splitting/combining, restored group history and layout transition logic with stable sets. Keep unfinished older operations and historical unconfirmed identities held for explicit review; do not replay or discard their removal state.
+- Use one per-output playback plan: filter unavailable/muted members, deduplicate consistent HA music groups to coordinators, keep Sonos AudioClip per speaker, and send effective requests concurrently. Retain announcements when supported, checked normal volume/playback otherwise. Do not call HA music-group services.
+- Replace rendered PCM silence and the latency audio cache with server-side download release offsets. Use one batch token plus a distinct output sub-token, count by token rather than IP, release at a common epoch, and bound requested waiting to 1.0 s plus 0–500 ms. Single-output delivery remains unheld. Original MP3 bytes and repeat scheduling are unchanged.
+- Keep private manual delays by HA device ID, with entity-ID fallback. Timing uses sliders, Save and an explicit Test at 10%. Existing values survive but require listening checks with the different timing method.
+- Remove microphone calibration, AudioWorklet/onset code, clock measurements, detailed ring diagnostics and their endpoints/UI. Retain only compact barrier counts, arrival spread and release reason.
+- Clean obsolete grouping preferences, microphone profiles and generated caches after completed migration. Exclude these from new exports and ignore them in older imports after checksum validation, while retaining any pending operation as review state.
+- Verify with fake HA/Protect transports and an isolated browser fixture only. Whether response holding sounds as well aligned as file silence still requires the user's explicit listening test. No real-speaker test audio is played by the agent.
+
 # 0.3.49 groups3
 
 - Add an explicit Group chimes picker for individually addressable Sonos announcement speakers when HA no longer reports a group and no previous group layout was saved. The user chooses members; never infer or change their music grouping.

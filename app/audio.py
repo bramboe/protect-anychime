@@ -20,7 +20,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, ProxyHandler, HTTPRedirectHandler, build_opener
 from announcement_sync import ALIGNMENT
-from ring_timing import TIMINGS
 
 CORE_API = "http://supervisor/core/api"
 MAX_RESPONSE_BYTES = 256 * 1024
@@ -93,33 +92,17 @@ class SpeakerBackend:
         self._members = tuple(dict.fromkeys(members))
         platforms=options.get('member_platforms')
         self._platforms={e:platforms.get(e,'') for e in self._members} if isinstance(platforms,dict) else {}
-        self._chime_only_group=options.get('chime_only_group') is True and all(self._platforms.get(e)=='sonos' for e in self._members)
-        self._entity = entity
-        self._media = media
-        self._member_media=options.get('member_media') or {}
-        if (not isinstance(self._member_media,dict) or (self._member_media and set(self._member_media)!=set(self._members)) or any(e not in self._members or not isinstance(u,str)
-                or urlsplit(u).netloc!=parsed.netloc or urlsplit(u).scheme!=parsed.scheme
-                or urlsplit(u).query or urlsplit(u).fragment
-                or not re.fullmatch(r'/media/delayed/[a-f0-9]{32}/[0-9]{1,3}\.wav',urlsplit(u).path)
-                for e,u in self._member_media.items())):
-            raise ValueError('Invalid per-speaker timing media.')
+        self._entity=entity
+        self._media=media
+        self._delays=options.get('member_delays') or {}
+        if not isinstance(self._delays,dict) or any(e not in self._members or type(v) is not int or not 0<=v<=500 for e,v in self._delays.items()):
+            raise ValueError('Invalid speaker delays.')
         self._enabled = allow_playback is True
         self._request = requester or _supervisor_request
         self._clock = clock or time.monotonic
         self._approval = None
-        self.timing_id=options.get("timing_id")
         self.last_alignment_token = None
         self._lock = threading.Lock()
-
-    def _send_play(self,method,path,body):
-        targets=body['entity_id'] if isinstance(body['entity_id'],list) else [body['entity_id']]
-        TIMINGS.correlate(self.timing_id,body['media_content_id'])
-        event=TIMINGS.sent(self.timing_id,targets)
-        try:result=self._request(method,path,body)
-        except Exception:
-            TIMINGS.response(self.timing_id,event,False);raise
-        TIMINGS.response(self.timing_id,event,True)
-        return result
 
     def plan(self, volume=25):
         """Preview the generic service request, without inspecting or arming HA."""
@@ -129,11 +112,14 @@ class SpeakerBackend:
                          "media_content_type": "music", "media_content_id": self._media},
                 "volume": volume}
 
-    def check_entity(self, entity=None):
-        """Read selected, safe player metadata; never return arbitrary attributes."""
-        entity = entity or self._entity
-        if entity not in self._members:
-            raise SpeakerError('This player is not part of the configured group.')
+    def check_entity(self,entity=None):
+        entity=entity or self._entity
+        if entity not in self._members:raise SpeakerError('This player is not part of the configured chime.')
+        return self._inspect(entity)
+
+    def _inspect(self,entity):
+        if not isinstance(entity,str) or not re.fullmatch(r'media_player\.[a-z0-9_]+',entity):
+            raise SpeakerError('Invalid HA group coordinator.')
         result = self._request("GET", "/states/" + entity, None)
         if not isinstance(result, dict) or result.get("entity_id") != entity:
             raise SpeakerError("Home Assistant did not return the selected speaker.")
@@ -194,76 +180,69 @@ class SpeakerBackend:
         _, expires, plan = approval
         if self._clock() >= expires:
             raise SpeakerError("Playback approval has expired.")
-        if self._entity in self._member_media:
-            plan['body']['media_content_id']=self._member_media[self._entity]
-        player = self.check_entity()
-        if player["state"] in ("off", "unavailable", "unknown", "standby"):
-            raise SpeakerError("The selected speaker is " + player["state"] +
-                               "; activate it in Home Assistant before playing audio.")
-        if player["is_volume_muted"]:
-            raise SpeakerError("The selected speaker is muted; unmute it in Home Assistant first.")
-        volume = plan["volume"]
-        features = player["supported_features"]
-        grouped = len(self._members)>1
-        if grouped and not self._chime_only_group and player['group_members'] is not None and set(player['group_members'])!=set(self._members):
-            raise SpeakerError('The speaker group changed. Refresh speakers before playing audio.')
-        players = [player] + [self.check_entity(e) for e in self._members if e!=self._entity]
-        announce = features is not None and bool(features & MEDIA_ANNOUNCE)
-        self.last_alignment_token=None
-        if self._chime_only_group and not announce:
-            raise SpeakerError('This chime-only group requires individual announcements. No playback was started.')
-        if announce:
-            targets=[self._entity]
-            alignment_token=None
-            # Sonos AudioClip is local to each speaker, not its music coordinator.
-            # Other integrations keep their normal coordinator/group semantics.
-            if grouped and all(self._platforms.get(e)=='sonos' for e in self._members):
-                targets=[]
-                for member in players:
-                    if member['state'] in ('off','unavailable','unknown','standby') or member['is_volume_muted']:
-                        continue
-                    if member['supported_features'] is None or not member['supported_features'] & MEDIA_ANNOUNCE:
-                        raise SpeakerError('A group member does not support announcements. No playback was started.')
-                    targets.append(member['entity_id'])
-                if self._member_media:
-                    urls,alignment_token=ALIGNMENT.register_many({e:self._member_media[e] for e in targets})
-                else:
-                    plan['body']['media_content_id'],alignment_token=ALIGNMENT.register(
-                        plan['body']['media_content_id'],len(targets))
-            self.last_alignment_token=alignment_token
-            plan['body'].update(entity_id=targets if len(targets)>1 else targets[0],
-                announce=True,extra={'volume':volume})
-            # Do not change the music volume. Integrations that support a separate
-            # announcement volume (including Sonos) consume extra.volume.
-            try:
-                if grouped and self._member_media:
-                    bodies=[{**plan['body'],'entity_id':e,'media_content_id':urls[e]} for e in targets]
-                    with ThreadPoolExecutor(max_workers=len(bodies)) as pool:
-                        futures=[pool.submit(self._send_play,plan['method'],plan['path'],body) for body in bodies]
-                        for future in futures:future.result()
-                else:
-                    self._send_play(plan['method'],plan['path'],plan['body'])
-            except Exception:
-                ALIGNMENT.release(alignment_token)
-                raise
-            return {'ha_call_accepted':True,'entity_id':self._entity,'volume':volume,
-                'mode':'group_announce' if grouped else 'announce','may_interrupt':False,
-                'download_alignment':alignment_token is not None,
-                'acoustic_playback_verified':False}
-        volume_targets = []
-        for member in players:
-            if member['state'] in ('off','unavailable','unknown','standby') or member['is_volume_muted']:
-                continue
-            member_features=member['supported_features']
-            if member_features is None or member_features & VOLUME_SET:
-                volume_targets.append(member['entity_id'])
-            elif member['volume_level'] is None or member['volume_level']>volume/100:
-                raise SpeakerError('A selected speaker cannot set its volume and its current level is unknown or above the requested level.')
-        if volume_targets:
-            self._request('POST','/services/media_player/volume_set',
-                {'entity_id':volume_targets if grouped else volume_targets[0], 'volume_level':volume/100})
-        self._send_play(plan["method"], plan["path"], plan["body"])
-        return {"ha_call_accepted": True, "entity_id": self._entity,
-                "volume": volume, "mode": "group" if grouped else "announce" if announce else "play_media",
-                "may_interrupt": not announce,
-                "acoustic_playback_verified": False}
+        volume=plan['volume']
+        if volume==0:return {'ha_call_accepted':True,'mode':'muted','volume':0,'audio_played':False,'effective_requests':0}
+        # Inspect independently: an unavailable first member must not block the rest.
+        with ThreadPoolExecutor(max_workers=len(self._members)) as pool:
+            players=list(pool.map(self.check_entity,self._members))
+        active=[p for p in players if self._playable(p)]
+        if not active:raise SpeakerError('No online, active, unmuted speakers are available.')
+        for p in active:
+            if self._platforms.get(p['entity_id'])=='sonos' and not (p['supported_features'] or 0)&MEDIA_ANNOUNCE:
+                group=p['group_members'] or []
+                if any(q['entity_id'] in group and (q['supported_features'] or 0)&MEDIA_ANNOUNCE for q in active):
+                    raise SpeakerError('This Sonos music group mixes announcement capabilities. No audio was started.')
+        targets=[];seen=set();by_id={p['entity_id']:p for p in players}
+        for player in active:
+            entity=player['entity_id'];origin=entity;announce=bool((player['supported_features'] or 0)&MEDIA_ANNOUNCE)
+            force_normal=self._platforms.get(entity)=='sonos' and not announce
+            group=player['group_members'] or []
+            # Sonos AudioClip is per speaker. Normal Sonos playback follows its group.
+            independent=self._platforms.get(entity)=='sonos' and announce
+            if not independent and len(group)>1 and entity in group:
+                signature=frozenset(group);leader=group[0]
+                reports=[p['group_members'] for p in players if p['entity_id'] in signature and p['group_members']]
+                if all(frozenset(g)==signature and g[0]==leader for g in reports):
+                    if signature in seen:continue
+                    seen.add(signature)
+                    player=by_id.get(leader) or self._inspect(leader)
+                    if not self._playable(player):continue
+                    entity=leader;announce=not force_normal and bool((player['supported_features'] or 0)&MEDIA_ANNOUNCE)
+            if any(t['entity']==entity for t in targets):continue
+            volume_targets=[]
+            volume_players=[q for q in active if q['entity_id'] in group] if len(group)>1 else [player]
+            if player not in volume_players:volume_players.append(player)
+            if not announce:
+              for volume_player in volume_players:
+                features=volume_player['supported_features']
+                if features is None or features&VOLUME_SET:volume_targets.append(volume_player['entity_id'])
+                elif volume_player['volume_level'] is None or volume_player['volume_level']>volume/100:
+                    raise SpeakerError('A selected speaker cannot set its volume safely. No audio was started.')
+            targets.append({'entity':entity,'announce':announce,'volume_targets':volume_targets,
+                'offset':self._delays.get(entity,self._delays.get(origin,0))})
+        if not targets:raise SpeakerError('The playback group coordinator is unavailable.')
+        urls,token=ALIGNMENT.register(self._media,{t['entity']:t['offset'] for t in targets})
+        self.last_alignment_token=token
+        def send(target):
+            entity=target['entity']
+            if target['volume_targets']:
+                volumes=target['volume_targets']
+                self._request('POST','/services/media_player/volume_set',{'entity_id':volumes if len(volumes)>1 else volumes[0],'volume_level':volume/100})
+            body={'entity_id':entity,'media_content_type':'music','media_content_id':urls[entity]}
+            if target['announce']:body.update(announce=True,extra={'volume':volume})
+            return self._request('POST','/services/media_player/play_media',body)
+        try:
+            with ThreadPoolExecutor(max_workers=len(targets)) as pool:
+                futures=[pool.submit(send,target) for target in targets]
+                for future in futures:future.result()
+        except Exception:
+            ALIGNMENT.release(token);raise
+        return {'ha_call_accepted':True,'entity_id':self._entity,'volume':volume,
+            'mode':'announce' if all(t['announce'] for t in targets) else 'play_media',
+            'may_interrupt':any(not t['announce'] for t in targets),
+            'effective_requests':len(targets),'download_alignment':token is not None,
+            'acoustic_playback_verified':False}
+
+    @staticmethod
+    def _playable(player):
+        return player['state'] not in ('off','standby','unavailable','unknown') and not player['is_volume_muted']

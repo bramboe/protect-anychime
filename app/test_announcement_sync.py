@@ -1,160 +1,70 @@
-from test_support import ringtone_file, seeded_store
-"""No real speaker/network calls: align simulated downloads, not acoustic output."""
+"""Download tests use synthetic bytes and fake HA, never real speakers."""
 import io
 from pathlib import Path
+import tempfile
 import threading
 import time
 import unittest
 from unittest.mock import Mock,patch
-from urllib.parse import urlsplit
-import server
+from urllib.parse import urlsplit,parse_qs
 from announcement_sync import DownloadAlignment
-from audio import SpeakerBackend,SpeakerError,MEDIA_ANNOUNCE
+import server
 
-PATH='/media/chimes/primary/1/'+'a'*32+'.mp3'
-URL='http://10.23.45.20:48200'+PATH
-ROOT=Path(__file__).parent
+URL='http://example.test/media/chimes/primary/1/'+'a'*32+'.mp3'
+def token(url):return parse_qs(urlsplit(url).query)['ac_sync'][0]
 
 class AlignmentTests(unittest.TestCase):
-    def test_early_download_waits_for_other_distinct_peer_then_releases_together(self):
-        pool=DownloadAlignment(max_wait=.5)
-        url,token=pool.register(URL,2)
-        self.assertIn('ac_sync=',url)
-        entered=threading.Event();done=threading.Event();released=[]
-        def first():
-            entered.set();pool.wait(token,PATH,'speaker-a');released.append(time.monotonic());done.set()
-        thread=threading.Thread(target=first);thread.start();self.assertTrue(entered.wait(1))
-        self.assertFalse(done.wait(.03))
-        before=time.monotonic();pool.wait(token,PATH,'speaker-b');thread.join(1)
-        self.assertTrue(done.is_set());self.assertGreaterEqual(released[0],before)
-
-    def test_duplicate_peer_does_not_count_as_two_speakers(self):
-        pool=DownloadAlignment(max_wait=.5);_,token=pool.register(URL,2)
-        done=threading.Event()
-        thread=threading.Thread(target=lambda:(pool.wait(token,PATH,'same-ip'),done.set()))
-        thread.start()
-        self.assertFalse(done.wait(.02))
-        with pool.lock:
-            self.assertEqual(pool.batches[token]['peers'],{'same-ip'})
-        pool.wait(token,PATH,'different-ip');thread.join(1)
-        self.assertTrue(done.is_set())
-
-    def test_missing_peer_timeout_is_bounded_and_subsequent_requests_do_not_wait(self):
-        pool=DownloadAlignment(max_wait=.03);_,token=pool.register(URL,2)
-        before=time.monotonic();pool.wait(token,PATH,'one-ip')
-        elapsed=time.monotonic()-before
-        self.assertGreaterEqual(elapsed,.02);self.assertLess(elapsed,.5)
-        before=time.monotonic();pool.wait(token,PATH,'one-ip')
-        self.assertLess(time.monotonic()-before,.02)
-
-    def test_each_ring_is_separate_and_path_mismatch_does_not_join_a_batch(self):
-        pool=DownloadAlignment();_,one=pool.register(URL,2);_,two=pool.register(URL,2)
-        self.assertNotEqual(one,two)
-        pool.wait(one,PATH.replace('/1/','/2/'),'different-track')
-        self.assertEqual(pool.batches[one]['peers'],set())
-        pool.release(one);self.assertTrue(pool.batches[one]['ready'].is_set())
-        self.assertFalse(pool.batches[two]['ready'].is_set())
-
-    def test_only_local_chime_routes_are_eligible_and_storage_is_bounded(self):
+    def test_same_proxy_ip_counts_distinct_subtokens_and_uses_one_release_epoch(self):
+        pool=DownloadAlignment(max_wait=.2);urls,batch=pool.register(URL,{'a':0,'b':50});done={}
+        def run(e):pool.wait(token(urls[e]),urlsplit(URL).path,'10.0.0.1');done[e]=time.monotonic()
+        a=threading.Thread(target=run,args=('a',));b=threading.Thread(target=run,args=('b',));a.start();time.sleep(.015);b.start();a.join();b.join()
+        summary=pool.summary(batch)
+        self.assertEqual(summary['distinct_downloads'],2);self.assertEqual(summary['release_reason'],'all_ready')
+        self.assertGreaterEqual(done['b']-done['a'],.035);self.assertLess(done['b']-done['a'],.15)
+        self.assertNotIn('10.0.0.1',str(summary));self.assertNotIn(batch,str(summary))
+    def test_unknown_missing_duplicate_and_wrong_path_never_add_delay_or_count(self):
+        pool=DownloadAlignment(max_wait=.01);urls,batch=pool.register(URL,{'a':500,'b':0})
+        started=time.monotonic()
+        for value,path in [(None,urlsplit(URL).path),(batch+'.'+'f'*16,urlsplit(URL).path),(token(urls['a']),'/wrong')]:pool.wait(value,path,'same')
+        self.assertLess(time.monotonic()-started,.03);self.assertEqual(pool.summary(batch)['distinct_downloads'],0)
+        pool.wait(token(urls['b']),urlsplit(URL).path,'same')
+        started=time.monotonic();pool.wait(token(urls['b']),urlsplit(URL).path,'same')
+        self.assertLess(time.monotonic()-started,.03);self.assertEqual(pool.summary(batch)['distinct_downloads'],1)
+    def test_one_output_has_neither_barrier_nor_offset(self):
+        urls,batch=DownloadAlignment().register(URL,{'a':500})
+        self.assertIsNone(batch);self.assertEqual(urls,{'a':URL})
+    def test_maximum_combined_wait_is_one_and_a_half_seconds(self):
+        pool=DownloadAlignment(max_wait=100);urls,batch=pool.register(URL,{'a':500,'b':0})
+        started=time.monotonic();pool.wait(token(urls['a']),urlsplit(URL).path)
+        elapsed=time.monotonic()-started
+        self.assertGreaterEqual(elapsed,1.45);self.assertLess(elapsed,1.7)
+        self.assertEqual(pool.summary(batch)['release_reason'],'timeout')
+    def test_offset_is_bound_server_side_and_cannot_be_supplied_in_url(self):
+        sleeps=[];pool=DownloadAlignment(max_wait=0,sleeper=sleeps.append)
+        urls,batch=pool.register(URL,{'a':30,'b':0})
+        pool.wait(token(urls['a'])+'&delay=500',urlsplit(URL).path)
+        self.assertEqual(sleeps,[])
+        pool.wait(token(urls['a']),urlsplit(URL).path)
+        self.assertTrue(0<sleeps[0]<=.03)
+    def test_expiry_and_capacity_are_bounded(self):
         now=[0];pool=DownloadAlignment(capacity=1,clock=lambda:now[0])
-        for url,count in [('http://example.test/ring.mp3',2),(URL,1),(URL,17),(URL+'?x=1',2)]:
-            self.assertEqual(pool.register(url,count),(url,None))
-        _,one=pool.register(URL,2)
-        self.assertEqual(pool.register(URL,2),(URL,None))
-        now[0]=61
-        _,two=pool.register(URL,2)
-        self.assertNotEqual(one,two);self.assertNotIn(one,pool.batches)
-        self.assertEqual(len(pool.batches),1)
-
-    def handler(self, *, command='GET',range_header=None):
-        h=server.Handler.__new__(server.Handler);h.command=command
-        h.path=PATH+'?ac_sync='+'b'*32;h.client_address=('speaker-a',1000)
-        h.headers={} if range_header is None else {'Range':range_header}
-        h.send_response=Mock();h.send_header=Mock();h.end_headers=Mock();h.respond=Mock();h.wfile=io.BytesIO()
-        return h
-
-    def test_http_waits_only_for_valid_starting_get_not_head_or_later_ranges(self):
-        for command,range_header,expected in [('GET',None,True),('GET','bytes=0-1023',True),
-            ('GET','bytes=0-20',False),('GET','bytes=0-1',False),
-            ('HEAD',None,False),('GET','bytes=4-9',False),('GET','bytes=99999999-',False)]:
-            with self.subTest(command=command,range=range_header):
-                h=self.handler(command=command,range_header=range_header)
-                with patch.object(server,'ALIGNMENT') as alignment:
-                    h.serve_audio(ringtone_file())
-                    self.assertEqual(alignment.wait.called,expected)
-                    if expected:alignment.wait.assert_called_once_with('b'*32,PATH,'speaker-a')
-                if command=='HEAD':self.assertEqual(h.wfile.getvalue(),b'')
-
-    def test_audio_disables_small_packet_buffering_and_ignores_socket_option_failure(self):
-        for fail in (False,True):
-            h=self.handler();h.path=PATH;h.connection=Mock()
-            if fail:h.connection.setsockopt.side_effect=OSError('Unsupported option')
-            h.serve_audio(ringtone_file())
-            h.connection.setsockopt.assert_called_once_with(server.socket.IPPROTO_TCP,server.socket.TCP_NODELAY,1)
-            self.assertEqual(h.wfile.getvalue(),(ringtone_file()).read_bytes())
-
-    def test_sonos_batch_registers_the_same_unique_url_for_all_targets_and_releases_on_error(self):
-        members=['media_player.a','media_player.b'];calls=[]
-        def request(method,path,body):
-            calls.append((method,path,body))
-            if method=='GET':return {'entity_id':path.rsplit('/',1)[1],'state':'playing',
-                'attributes':{'supported_features':516|MEDIA_ANNOUNCE,'group_members':members}}
-            raise SpeakerError('Synthetic HA failure')
-        backend=SpeakerBackend({'speaker_entity':members[0],'audio_url':URL,'group_members':members,
-            'member_platforms':{e:'sonos' for e in members}},allow_playback=True,requester=request)
-        with patch('audio.ALIGNMENT') as alignment:
-            alignment.register.return_value=(URL+'?ac_sync='+'b'*32,'b'*32)
-            with self.assertRaises(SpeakerError):backend.play_once(backend.arm_once(confirmed=True)['approval_id'])
-            alignment.register.assert_called_once_with(URL,2);alignment.release.assert_called_once_with('b'*32)
-        posts=[c for c in calls if c[0]=='POST']
-        self.assertEqual(len(posts),1);self.assertEqual(posts[0][2]['entity_id'],members)
-        self.assertTrue(posts[0][2]['announce']);self.assertIn('ac_sync=',posts[0][2]['media_content_id'])
-
-class TimingRegressionTests(unittest.TestCase):
-    def test_group_still_waits_for_a_download_arriving_after_old_300ms_limit(self):
-        pool=DownloadAlignment();_,token=pool.register(URL,2)
-        entered=threading.Event();done=threading.Event()
-        def first():
-            entered.set();pool.wait(token,PATH,'first-speaker');done.set()
-        thread=threading.Thread(target=first);thread.start()
-        self.assertTrue(entered.wait(1));self.assertFalse(done.wait(.35))
-        pool.wait(token,PATH,'second-speaker');thread.join(1)
-        self.assertTrue(done.is_set())
-        summary=pool.summary(token)
-        self.assertEqual(summary['release_reason'],'all_ready')
-        self.assertEqual(summary['distinct_downloads'],2)
-        self.assertGreaterEqual(summary['arrival_spread_ms'],300)
-        self.assertFalse(summary['acoustic_sync_verified'])
-    def test_late_arrival_is_reported_after_timeout_and_duplicates_do_not_change_timing(self):
-        now=[0];pool=DownloadAlignment(max_wait=0,clock=lambda:now[0]);_,token=pool.register(URL,2)
-        pool.wait(token,PATH,'10.23.45.31')
-        now[0]=.2;pool.wait(token,PATH,'10.23.45.31')
-        self.assertEqual(pool.summary(token)['distinct_downloads'],1)
-        now[0]=.6;pool.wait(token,PATH,'10.23.45.32')
-        result=pool.summary(token)
-        self.assertEqual(result['release_reason'],'timeout')
-        self.assertEqual(result['arrival_spread_ms'],600)
-        self.assertEqual(result['distinct_downloads'],2)
-        for private in ['10.23.45.31',PATH,token]:self.assertNotIn(private,str(result))
-    def test_full_response_including_headers_is_held_until_group_gate_releases(self):
-        h=AlignmentTests().handler();events=[]
-        h.send_response.side_effect=lambda *_:events.append('headers')
-        with patch.object(server,'ALIGNMENT') as alignment:
-            alignment.wait.side_effect=lambda *_:events.append('alignment')
-            h.serve_audio(ringtone_file())
-        self.assertEqual(events,['alignment','headers'])
-        self.assertEqual(h.wfile.getvalue(),ringtone_file().read_bytes())
-    def test_cancelled_group_releases_waiters_and_keeps_diagnostics_bounded(self):
-        pool=DownloadAlignment();_,token=pool.register(URL,2)
-        pool.release(token)
-        self.assertEqual(pool.summary(token)['release_reason'],'cancelled')
-        self.assertIsNone(pool.summary(None))
-    def test_player_status_reports_timing_without_exposing_internal_token(self):
-        from playback import TrackPlayer
-        pool=DownloadAlignment(max_wait=0);_,token=pool.register(URL,2)
-        player=TrackPlayer('primary','media_player.example',None,'http://10.23.45.20:48200')
-        player.last_result={'state':'ha_accepted'};player.alignment_token=token
-        pool.wait(token,PATH,'speaker-a')
-        with patch('playback.ALIGNMENT',pool):result=player.status()
-        self.assertEqual(result['last_result']['download_timing']['release_reason'],'timeout')
-        self.assertNotIn(token,str(result))
+        _,first=pool.register(URL,{'a':0,'b':0});_,blocked=pool.register(URL,{'a':0,'b':0})
+        self.assertIsNone(blocked);now[0]=61
+        _,second=pool.register(URL,{'a':0,'b':0})
+        self.assertIsNotNone(second);self.assertIsNone(pool.summary(first));self.assertEqual(len(pool.batches),1)
+    def test_error_release_unblocks_waiters_without_applying_offset(self):
+        pool=DownloadAlignment();urls,batch=pool.register(URL,{'a':500,'b':0})
+        t=threading.Thread(target=pool.wait,args=(token(urls['a']),urlsplit(URL).path));t.start();time.sleep(.015)
+        start=time.monotonic();pool.release(batch);t.join(.15)
+        self.assertFalse(t.is_alive());self.assertLess(time.monotonic()-start,.15)
+    def test_http_holds_headers_only_for_initial_nonprobe_get(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'fake.mp3';path.write_bytes(b'fake'*512)
+            for method,rng,waits in [('GET',None,True),('GET','bytes=0-1023',True),('GET','bytes=0-1',False),('GET','bytes=10-1023',False),('HEAD',None,False)]:
+                with self.subTest(method=method,rng=rng):
+                    h=server.Handler.__new__(server.Handler);h.command=method;h.path=urlsplit(URL).path+'?ac_sync='+'a'*32+'.'+'b'*16
+                    h.headers={'Range':rng} if rng else {};h.client_address=('10.0.0.1',1);h.wfile=io.BytesIO();h.send_response=Mock();h.send_header=Mock();h.end_headers=Mock()
+                    def gate(*args):h.send_response.assert_not_called();h.end_headers.assert_not_called()
+                    with patch('server.ALIGNMENT.wait',side_effect=gate) as wait:h.serve_audio(path)
+                    self.assertEqual(wait.called,waits)
+                    self.assertEqual(bool(h.wfile.getvalue()),method!='HEAD')

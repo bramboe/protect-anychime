@@ -8,7 +8,6 @@ import threading
 import speakers
 import artwork
 import products
-import chime_layout
 from registry import ChimeRegistry
 import configuration
 import migration
@@ -24,29 +23,18 @@ from runtime import NativeWorker
 from audio import SpeakerBackend, SpeakerError
 from onboarding import SpeakerOnboarding
 from announcement_sync import ALIGNMENT
-from ring_timing import TIMINGS
-from calibration import Calibration,CalibrationError
-from manual_timing import ManualTiming,DelayAudioCache
+from manual_timing import ManualTiming
 
 ROOT = Path(__file__).resolve().parent
 NATIVE = NativeWorker()
-VERSION = "0.3.49"
+VERSION = "0.4.0"
 DEFAULT_PORT = 48200
 SELECTION_LOCK = NATIVE.selection_lock
 DATA_ROOT = Path(os.environ.get("ANYCHIME_DATA_DIR", "/data"))
 IMAGES = artwork.ImageCache(DATA_ROOT / "product-images")
-CALIBRATION=Calibration(DATA_ROOT)
 MANUAL_TIMING=ManualTiming(DATA_ROOT)
-DELAY_AUDIO=DelayAudioCache(DATA_ROOT)
 CERTIFICATES = connection.CertificateManager()
 MANAGEMENT = management.ProtectManagement(DATA_ROOT / "protect-management.json")
-
-
-def layout_rows(rows):
-    return NATIVE.registry.layouts.decorate(rows) if isinstance(NATIVE.registry,ChimeRegistry) else rows
-
-def layout_pending():
-    return NATIVE.registry.layouts.pending if isinstance(NATIVE.registry,ChimeRegistry) else None
 
 
 def load_options():
@@ -83,26 +71,6 @@ def repair_adoption(key):
 
 NATIVE.adoption_checker=repair_adoption
 
-def cleanup_old_chimes():
-    if not NATIVE.selection_lock.acquire(blocking=False):
-        return {'retry_later':True}
-    try:
-        options=load_options();host=options.get('controller_ip','')
-        if not MANAGEMENT.status(host).get('ready'):
-            return {'retry_later':True}
-        entries=[e for e in NATIVE.registry.snapshot() if not e['active']
-            and (e['entity_id'] is not None or (NATIVE.registry.identity_dir(e)/'identity.json').exists()) and e.get('removal_source')!='protect']
-        keys=[e['key'] for e in entries if (NATIVE.registry.identity_dir(e)/'identity.json').is_file()]
-        if keys:MANAGEMENT.remove_virtual_chimes(host,keys,NATIVE,allow_absent=True)
-        # Entries without identity files contain no ownership material to retain.
-        for entry in entries:
-            if entry['key'] not in keys:
-                NATIVE.remove_from_protect(entry['key']);NATIVE.complete_removal(entry['key'])
-        return {'cleaned':len(entries),'audio_played':False}
-    finally:NATIVE.selection_lock.release()
-
-NATIVE.history_cleaner=cleanup_old_chimes
-
 def sync_speaker_names(keys):
     if not NATIVE.selection_lock.acquire(blocking=False):return {'completed':[]}
     try:
@@ -112,6 +80,13 @@ def sync_speaker_names(keys):
     finally:NATIVE.selection_lock.release()
 
 NATIVE.name_synchronizer=sync_speaker_names
+
+def remove_confirmed_chime(host,key):
+    entry=next((e for e in NATIVE.registry.snapshot() if e['key']==key),None) if NATIVE.registry else None
+    if entry and entry.get('removal_pending'):
+        return MANAGEMENT.remove_virtual_chime(host,key,NATIVE,allow_absent=True)
+    return MANAGEMENT.remove_virtual_chime(host,key,NATIVE)
+
 
 def preview(options, volume=25):
     if type(volume) not in (int, float) or not 0 <= volume <= 100:
@@ -146,15 +121,7 @@ class Handler(BaseHTTPRequestHandler):
         if getattr(self, "command", "GET") != "HEAD":
             self.wfile.write(content)
 
-    def serve_audio(self, path):
-        self._audio_write_ok=False
-        peer=getattr(self,"client_address",("unknown",0))[0]
-        trace=TIMINGS.download(getattr(self,"path",""),peer,getattr(self,"headers",{}).get("Range")) if getattr(self,"command","GET")=="GET" else None
-        try:return self._serve_audio(path)
-        finally:
-            if trace:TIMINGS.end(trace,peer,getattr(self,"_audio_write_ok",False))
-
-    def _serve_audio(self, path):
+    def serve_audio(self,path):
         try:
             data = path.read_bytes()
         except OSError:
@@ -187,10 +154,10 @@ class Handler(BaseHTTPRequestHandler):
             if start==0 and end-start+1>=min(256,total):
                 parsed=urlsplit(getattr(self,'path',''))
                 tokens=parse_qs(parsed.query).get('ac_sync',[])
-                if len(tokens)==1 and re.fullmatch('[a-f0-9]{32}',tokens[0]):
+                if len(tokens)==1 and re.fullmatch(r'[a-f0-9]{32}\.[a-f0-9]{16}',tokens[0]):
                     ALIGNMENT.wait(tokens[0],parsed.path,self.client_address[0])
         self.send_response(status)
-        self.send_header("Content-Type", "audio/wav" if path.suffix==".wav" else "audio/mpeg")
+        self.send_header("Content-Type", "audio/mpeg")
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(end-start+1))
         if status == 206:
@@ -205,12 +172,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         route = urlsplit(self.path).path
-        delayed=re.fullmatch(r'/media/delayed/([a-f0-9]{32})/([0-9]{1,3})\.wav',route)
-        if delayed:
-            try:asset=DELAY_AUDIO.media(delayed[1],int(delayed[2]))
-            except ValueError:asset=None
-            if asset is None:return self.respond(404,{'error':'Timing audio unavailable.'})
-            return self.serve_audio(asset)
         if route == '/api/timing':
             if self.client_address[0]!='172.30.32.2':return self.respond(403,{'error':'Authenticated Home Assistant ingress required'})
             try:
@@ -219,16 +180,6 @@ class Handler(BaseHTTPRequestHandler):
                 if not entry:raise ValueError('Choose an added chime.')
                 return self.respond(200,MANUAL_TIMING.describe(entry,speakers.discover()))
             except (ValueError,OSError,SpeakerError):return self.respond(400,{'error':'Could not load timing settings.'})
-        calibration_media=re.fullmatch(r'/media/calibration/([a-f0-9]{32})\.mp3',route)
-        if calibration_media:
-            asset=CALIBRATION.media(calibration_media[1])
-            if asset is None:return self.respond(404,{'error':'Calibration click expired.'})
-            return self.serve_audio(asset)
-        if route in ('/api/diagnostics/rings','/api/calibration/status','/api/calibration/clock'):
-            if self.client_address[0]!='172.30.32.2':return self.respond(403,{'error':'Authenticated Home Assistant ingress required'})
-            if route.endswith('/rings'):return self.respond(200,{'rings':TIMINGS.recent(),'compensation_applied':any(MANUAL_TIMING.read().values())})
-            if route.endswith('/clock'):return self.respond(200,TIMINGS.stamp())
-            return self.respond(200,CALIBRATION.status())
         match = re.fullmatch(r"/media/chimes/(primary|[a-f0-9]{24})/([1-9]|10)/([a-f0-9]{32})\.mp3", route)
         if match:
             asset = NATIVE.media(match[1], int(match[2]), match[3])
@@ -240,7 +191,7 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/":
             return self.respond(200, (ROOT / "index.html").read_bytes(),
                                 "text/html; charset=utf-8")
-        if route in ('/assets/calibration.js','/assets/onset-detector.js','/assets/onset-worklet.js'):
+        if route in ('/assets/timing.js','/assets/speakers.js'):
             return self.respond(200,(ROOT/'assets'/route.rsplit('/',1)[1]).read_bytes(),'application/javascript')
         if route == "/assets/sortable.min.js":
             return self.respond(200,(ROOT/'assets'/'sortable.min.js').read_bytes(),'application/javascript')
@@ -255,10 +206,6 @@ class Handler(BaseHTTPRequestHandler):
             if path.parent != assets or path.suffix not in (".png", ".svg") or not path.is_file():
                 return self.respond(404, {"error": "Not found"})
             return self.respond(200, path.read_bytes(), mimetypes.guess_type(path.name)[0])
-        if route == "/api/management/chime-count":
-            if self.client_address[0] != "172.30.32.2":
-                return self.respond(403,{"error":"Authenticated Home Assistant ingress required"})
-            return self.respond(200,MANAGEMENT.chime_count(load_options().get('controller_ip','')))
         if route == "/api/products":
             if self.client_address[0] != "172.30.32.2":
                 return self.respond(403,{"error":"Authenticated Home Assistant ingress required"})
@@ -269,19 +216,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(503,{"error":"Could not load product information from Home Assistant."})
         if route == "/api/speakers":
             try:
-                inventory = layout_rows(speakers.discover(include_excluded=True))
-                eligible,selected=speakers.selection_inventory(inventory,(layout_pending() or {}).get("entities",load_options()["speaker_entities"]),
+                inventory = speakers.discover(include_excluded=True)
+                eligible,selected=speakers.selection_inventory(inventory,load_options()["speaker_entities"],
                     NATIVE.registry.snapshot() if NATIVE.registry is not None else [])
                 NATIVE.refresh_groups(eligible)
-                return self.respond(200, {"speakers": eligible, "groups": speakers.visual_groups(eligible), "layout_change":layout_pending(),
-                    "selected":selected})
+                return self.respond(200,{"speakers":eligible,"selected":selected,
+                    "chimes":NATIVE.registry.snapshot() if NATIVE.registry else [],
+                    "membership_migration":NATIVE.registry.migration.status(NATIVE.registry.snapshot()) if NATIVE.registry else {}})
             except (SpeakerError, ValueError, OSError):
                 return self.respond(503, {"error": "Could not load speakers from Home Assistant."})
         if route == "/api/connection":
             return self.respond(200, connection.public_status(load_options()))
         if route == "/api/status":
             options = load_options()
-            return self.respond(200, {"version": VERSION, "build": "groups3",
+            return self.respond(200, {"version": VERSION, "build": "sets1",
                 "mode": "protect_controlled", "native": NATIVE.status(),
                 "connection": connection.public_status(options),
                 "management": MANAGEMENT.status(options.get('controller_ip','')),
@@ -299,7 +247,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(body,dict) or body.get('confirmed') is not True:raise ValueError('Confirm saving timing settings.')
                 with SELECTION_LOCK:
                     entry=next((e for e in NATIVE.registry.snapshot() if e['key']==body.get('key') and e['active']),None) if NATIVE.registry else None
-                    if not entry or layout_pending():raise ValueError('Finish chime setup first.')
+                    if not entry or entry.get("migration_hold") or entry.get("removal_pending"):raise ValueError('Finish chime setup first.')
                     rows=speakers.discover();description=MANUAL_TIMING.describe(entry,rows)
                     values=body.get('delays')
                     if not description['supported'] or not isinstance(values,dict) or set(values)!={m['device_id'] for m in description['members']}:
@@ -311,53 +259,6 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed() or self.headers.get("X-Prototype-Test") != "silent":
             return self.respond(403, {"error": "Silent ingress test required"})
         route = urlsplit(self.path).path
-        if route.startswith('/api/calibration/'):
-            if self.client_address[0]!='172.30.32.2':return self.respond(403,{'error':'Authenticated Home Assistant ingress required'})
-            try:
-                length=int(self.headers.get('Content-Length','0'))
-                if not 0<length<=8192:raise CalibrationError('Invalid calibration request.')
-                body=json.loads(self.rfile.read(length))
-                if not isinstance(body,dict) or body.get('confirmed') is not True:
-                    raise CalibrationError('Start each calibration explicitly in the app.')
-                if route.endswith('/start'):
-                    if body.get('microphone_ready') is not True or body.get('secure_context') is not True:
-                        raise CalibrationError('A secure browser session and microphone access are required. No sound was started.')
-                    with SELECTION_LOCK:
-                        if NATIVE.registry is None or layout_pending():raise CalibrationError('Finish chime setup before calibration.')
-                        entry=next((e for e in NATIVE.registry.snapshot() if e['key']==body.get('key') and e['active']),None)
-                        if not entry:raise CalibrationError('Choose an active local chime.')
-                        options=load_options();base='http://'+options['native_ip']+':'+str(DEFAULT_PORT)
-                        result=CALIBRATION.start(entry,speakers.discover(),base,body.get('volume'))
-                elif route.endswith('/trial'):
-                    with SELECTION_LOCK:
-                        session=CALIBRATION._session(body.get('session'))
-                        entry=next((e for e in NATIVE.registry.snapshot() if e['key']==session['key'] and e['active']),None)
-                        if not entry or layout_pending() or set(entry.get('members',[entry['entity_id']]))!={m['entity_id'] for m in session['members']}:
-                            raise CalibrationError('Chime membership changed. Cancel and start again.')
-                        result=CALIBRATION.trial(body.get('session'),body.get('index'))
-                elif route.endswith('/sample'):
-                    result=CALIBRATION.sample(body.get('session'),body.get('index'),body.get('ha_latency_ms'),body.get('request_latency_ms'),body.get('clock_uncertainty_ms'))
-                elif route.endswith('/cancel'):result=CALIBRATION.cancel(body.get('session'))
-                else:return self.respond(404,{'error':'Unknown calibration action.'})
-                return self.respond(200,result)
-            except (ValueError,OSError,SpeakerError,TimeoutError) as error:
-                return self.respond(400,{'error':str(error) if isinstance(error,ValueError) else 'Calibration could not complete. No automatic retry.'})
-        if route == "/api/chimes/layout":
-            if self.client_address[0] != "172.30.32.2":
-                return self.respond(403,{"error":"Authenticated Home Assistant ingress required"})
-            try:
-                length=int(self.headers.get('Content-Length','0'))
-                if not 0<length<=4096:raise ValueError('Invalid chime layout request.')
-                payload=json.loads(self.rfile.read(length))
-                if not isinstance(payload,dict) or payload.get('confirmed') is not True:
-                    raise ValueError('Confirm the replacement of these chimes in Protect.')
-                with SELECTION_LOCK:
-                    rows=speakers.discover();options=load_options()
-                    result=chime_layout.change(NATIVE,MANAGEMENT,options.get('controller_ip',''),
-                        payload.get('members'),payload.get('separate'),rows,allow_custom=payload.get('custom') is True)
-                return self.respond(200,result)
-            except (ValueError,SpeakerError,OSError) as error:
-                return self.respond(400,{'error':str(error) if isinstance(error,ValueError) else 'Could not finish the chime change. Resume when Protect is reachable.'})
         if route == "/api/products/link":
             if self.client_address[0] != "172.30.32.2":
                 return self.respond(403,{"error":"Authenticated Home Assistant ingress required"})
@@ -396,7 +297,7 @@ class Handler(BaseHTTPRequestHandler):
                     elif route.endswith('/prepare-adoption'):
                         result = MANAGEMENT.prepare_adoption(options.get('controller_ip',''),key,NATIVE)
                     else:
-                        result = MANAGEMENT.remove_virtual_chime(options.get('controller_ip',''),key,NATIVE)
+                        result = remove_confirmed_chime(options.get('controller_ip',''),key)
                 return self.respond(200,result)
             except (ValueError,OSError,TimeoutError) as error:
                 message = str(error) if isinstance(error,ValueError) else 'Protect management could not be completed.'
@@ -457,48 +358,38 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(400, {"error": str(error)})
             except (OSError, SpeakerError):
                 return self.respond(503, {"error": "Could not read the console certificate. Check the address and connection."})
-        if route == "/api/speakers":
+        if route in ('/api/chimes/members','/api/chimes/migration/finish'):
+            if self.client_address[0]!='172.30.32.2':return self.respond(403,{'error':'Authenticated Home Assistant ingress required'})
             try:
-                length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 4096:
-                    raise ValueError("Invalid request.")
-                payload = json.loads(self.rfile.read(length))
-                if not isinstance(payload, dict):
-                    raise ValueError("Invalid request.")
+                length=int(self.headers.get('Content-Length','0'))
+                if not 0<length<=8192:raise ValueError('Invalid membership request.')
+                body=json.loads(self.rfile.read(length))
+                if not isinstance(body,dict) or body.get('confirmed') is not True:raise ValueError('Confirm this chime action.')
                 with SELECTION_LOCK:
-                    inventory=layout_rows(speakers.discover(include_excluded=True))
-                    options=load_options()
-                    rows,_=speakers.selection_inventory(inventory,options['speaker_entities'],
-                        NATIVE.registry.snapshot() if NATIVE.registry is not None else [])
-                    previous = set(options["speaker_entities"])
-                    entities = speakers.validate_selection(payload.get("entities"), rows,existing=previous)
-                    extra=payload.get('remove_keys',[])
-                    if (not isinstance(extra,list) or len(extra)>16
-                            or any(not isinstance(key,str) or not re.fullmatch(r'primary|[a-f0-9]{24}',key) for key in extra)
-                            or len(set(extra))!=len(extra)):
-                        raise ValueError('Invalid previous-chime selection.')
-                    removals=NATIVE.plan_selection(entities,rows,extra)
-                    removed=[]
-                    if removals:
-                        removed=MANAGEMENT.remove_virtual_chimes(options.get('controller_ip',''),removals,NATIVE,
-                            allow_absent=True)['removed_keys']
-                    entries = NATIVE.configure_selection(entities, rows)
-                    try:
-                        speakers.save(entities)  # Legacy selection mirror; registry is authoritative.
-                    except OSError:
-                        print("Legacy selection mirror unavailable; chime registry saved.",flush=True)
-                    added = [e.get('playback_entity',e['entity_id']) for e in entries if e['active']
-                        and not previous.intersection(e.get('members',[e['entity_id']]))]
-                    # Speaker setup stays silent. Only Protect-delivered tracks
-                    # are played; no firmware-derived confirmation asset is shipped.
-                    feedback = {'state':'disabled','audio_played':False}
-                return self.respond(200, {"selected": entities, "onboarding": feedback,
-                    "removed_chimes":removed,
-                    "audio_played": None if feedback['state'] == 'queued' else False})
-            except (ValueError, SpeakerError) as error:
-                return self.respond(400, {"error": str(error)})
-            except OSError:
-                return self.respond(500, {"error": "Could not save the speaker selection."})
+                    registry=NATIVE.registry
+                    if registry is None:raise ValueError('The app is starting.')
+                    if route.endswith('/finish'):
+                        registry.migration.finish(registry.snapshot())
+                    else:
+                        action=body.get('action');entity=body.get('entity_id')
+                        rows=speakers.discover()
+                        if action=='remove':
+                            entry=next((e for e in registry.snapshot() if e['key']==body.get('key') and e['active']),None)
+                            if not entry or entity not in entry['members']:raise ValueError('This speaker is no longer in the chime.')
+                            if len(entry['members'])==1:
+                                if body.get('confirm_last') is not True:raise ValueError('Confirm Protect removal of this chime’s last speaker.')
+                                options=load_options()
+                                remove_confirmed_chime(options.get('controller_ip',''),entry['key'])
+                            else:registry.detach(entry['key'],entity,rows)
+                        elif action in ('add','move'):
+                            if registry.migration.status(registry.snapshot())['required']:raise ValueError('Finish reviewing the older chime change first.')
+                            registry.transfer(entity,body.get('target_key'),rows)
+                        else:raise ValueError('Choose add, move or remove.')
+                    NATIVE.refresh_players()
+                    try:speakers.save(registry.selected_entities(),path=registry.directory/'speakers.json')
+                    except OSError:pass
+                return self.respond(200,{'selected':registry.selected_entities(),'audio_played':False})
+            except (ValueError,OSError,SpeakerError) as error:return self.respond(400,{'error':str(error) if isinstance(error,ValueError) else 'Could not save the chime change.'})
         if route != "/api/preview":
             return self.respond(404, {"error": "Not found"})
         try:
@@ -555,7 +446,7 @@ def run_server():
         options = MANAGEMENT.migrate_to_configuration(options, configuration.self_options)
         MANAGEMENT.configure(options)
         NATIVE.start(options)
-        print(f"Protect AnyChime {VERSION} (groups3): web interface on {port}; playback controlled by Protect.", flush=True)
+        print(f"Protect AnyChime {VERSION} (sets1): web interface on {port}; playback controlled by Protect.", flush=True)
         server.serve_forever()
     finally:
         try:

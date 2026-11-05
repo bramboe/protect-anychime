@@ -4,7 +4,6 @@ Management routes follow inspected Protect 7.3.70 modules443675/655592.
 UCP4 follows3234/188339/412614. This is not a native-adoption success claim.
 """
 import asyncio
-from ring_timing import TIMINGS
 import hashlib
 import hmac
 import ipaddress
@@ -308,7 +307,6 @@ class NativeChime:
         return headers
 
     async def process_request(self, header, body):
-        received_timing={"monotonic_ms":time.monotonic_ns()/1e6,"unix_ms":time.time_ns()/1e6}
         if header.get("type") != "request" or not isinstance(header.get("id"), str):
             raise ValueError("Expected correlated request")
         response = {"id": header["id"], "type": "response", "errorCode": 0, "error": ""}
@@ -363,7 +361,6 @@ class NativeChime:
         if action in ("networkStatus", "getNetworkStatus"):
             return response, {"linkSpeedMbps": 1000}
         if action in ("playSpeaker", "playBuzzer"):
-            timing_id=TIMINGS.begin(self.options.get("timing_key","primary"),action,received_timing)
             if self.ringtone_store is not None:
                 try:
                     track = self.ringtone_store.get(body.get("track_no", 1))
@@ -377,10 +374,10 @@ class NativeChime:
             if len(self.protocol.plans) > before:
                 self.protocol.plans[:] = self.protocol.plans[-32:]
                 self.last_play = {"track_no": body.get("track_no", 1),
-                                  "source_action": action,"timing_id":timing_id,
+                                  "source_action": action,
                                   "volume": body.get("volume", 80),
                                   "repeat": body.get("repeat", 1),
-                                  "received_at": int(time.time()), "received_timing":received_timing, "audio_played": False}
+                                  "received_at": int(time.time()), "audio_played": False}
                 if self.on_play:
                     # The callback receives the exact Protect-selected intent.
                     result = self.on_play(dict(self.last_play))

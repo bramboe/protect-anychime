@@ -26,10 +26,7 @@ class NativeWorker:
         self.selection_lock=threading.RLock()
         self.error=None
         self.cleanup_error=None
-        self.history_cleanup_error=None
         self._purge_locks={}
-        self.history_cleaner=None
-        self._history_seen=None
         self.thread=None
         self.options={}
         self._network_keys=set()
@@ -51,9 +48,10 @@ class NativeWorker:
             connected=sum(c.get('connected',False) for c in chimes)
             return {'auto_adoption_error':any(v.get('error') for v in self._auto_adopt_state.values()),'auto_adopt_enabled':self.options.get('auto_adopt_chimes') is True,'enabled':bool(self.thread and not self.stop_event.is_set()),
                     'connected':bool(connected),'connected_count':connected,
-                    'chimes':chimes,'runtime_error':self.error or self.cleanup_error or self.history_cleanup_error,'diagnostics':dict(self.diagnostics),
+                    'chimes':chimes,'runtime_error':self.error or self.cleanup_error,'diagnostics':dict(self.diagnostics),
                     'known_chimes':(self.registry.snapshot() if self.registry is not None else []),
-                    'selected_entities':((self.registry.layouts.pending or {}).get('entities',self.registry.selected_entities()) if self.registry is not None else None),
+                    'membership_migration':self.registry.migration.status(self.registry.snapshot()) if self.registry is not None else {},
+                    'selected_entities':(self.registry.selected_entities() if self.registry is not None else None),
                     'redundant_chimes':([e for e in self.registry.snapshot() if e.get('superseded_by')
                         and e.get('removal_source')!='protect'] if self.registry is not None else []),
                     'discovery_responses':self.responder.responses if self.responder else 0,
@@ -69,7 +67,7 @@ class NativeWorker:
             return
         self.options=dict(options)
         self.registry=ChimeRegistry(Path(data_dir).parent)
-        if not self.registry.path.exists():
+        if not any(e.get('entity_id') for e in self.registry.snapshot()) and options.get('speaker_entities'):
             self.registry.sync(list(options.get('speaker_entities',[])))
         self.diagnostics={'saved_primary_identity':(Path(data_dir)/'identity.json').is_file(),
             'selected_speakers':len(self.registry.selected_entities()),
@@ -91,6 +89,21 @@ class NativeWorker:
             return self.registry.sync(self.registry.selected_entities(),rows,user_change=False)
         finally:
             self.selection_lock.release()
+
+    @staticmethod
+    def _update_player(node,entry):
+        player=node['player']
+        with player.lock:
+            player.entity_id=entry.get('playback_entity',entry['entity_id'])
+            player.group_members=tuple(entry.get('members',[entry['entity_id']]))
+            player.member_platforms=dict(entry.get('member_platforms',{}))
+            player.member_device_ids=dict(entry.get('member_device_ids',{}))
+        node['native'].options['display_name']=entry['name']
+
+    def refresh_players(self):
+        for entry in self.registry.snapshot():
+            with self.lock:node=self.nodes.get(entry['key'])
+            if node and entry['active']:self._update_player(node,entry)
 
     def plan_selection(self, entities, rows, extra_removals=None):
         if self.registry is None:
@@ -231,24 +244,6 @@ class NativeWorker:
                     print('Confirmed chime cleanup pending; identity remains disabled.',flush=True)
         return deferred
 
-    async def _cleanup_history(self):
-        if self.history_cleaner is None:return
-        candidates=tuple(sorted(e['key'] for e in self.registry.snapshot()
-            if not e['active'] and (e['entity_id'] is not None or (self.registry.identity_dir(e)/'identity.json').exists()) and e.get('removal_source')!='protect'))
-        if not candidates:
-            self.history_cleanup_error=None
-            return
-        if candidates==self._history_seen:return
-        try:
-            result=await asyncio.to_thread(self.history_cleaner)
-            if not result.get('retry_later'):
-                self._history_seen=candidates;self.history_cleanup_error=None
-            else:self.history_cleanup_error='Old chime cleanup needs a configured local Protect account.'
-        except Exception:
-            self._history_seen=candidates
-            self.history_cleanup_error='Old chime cleanup needs Protect access. Check the app logs and configuration.'
-            print('Old chime cleanup could not be confirmed; no identity was discarded.',flush=True)
-
     def _descriptors(self):
         with self.lock:
             return list(self._discovery)
@@ -278,18 +273,17 @@ class NativeWorker:
                     self.stop_event.set()
             udp=threading.Thread(target=discover,daemon=True,name='chime-discovery')
             udp.start()
-            last_groups = float('-inf')
+            last_metadata = float('-inf')
             while not self.stop_event.is_set():
-                if time.monotonic() - last_groups >= 30:
-                    last_groups = time.monotonic()
+                if time.monotonic() - last_metadata >= 30:
+                    last_metadata = time.monotonic()
                     try:
                         self.refresh_groups(await asyncio.to_thread(speakers.discover))
                     except Exception:
-                        print('Speaker group refresh unavailable; keeping saved groups.',flush=True)
+                        print('Speaker metadata refresh unavailable; keeping saved chime sets.',flush=True)
                 await self._reconcile(data_dir)
                 await self._auto_adopt_new_chimes()
                 await self._repair_stale_adoptions()
-                await self._cleanup_history()
                 await self._sync_names()
                 await asyncio.sleep(1)
             udp.join(timeout=2)
@@ -361,12 +355,12 @@ class NativeWorker:
 
     def _entry_enabled(self, key):
         entry = next((e for e in self.registry.snapshot() if e['key'] == key), None)
-        return bool(entry and entry['active'] and entry.get('speaker_available',True) and not entry.get('removal_pending') and not self.registry.layouts.blocked(entry))
+        return bool(entry and entry['active'] and entry.get('speaker_available',True) and not entry.get('removal_pending') and not entry.get('migration_hold'))
 
     async def _reconcile(self, data_dir):
         deferred=await self._cleanup_confirmed()
         entries=self.registry.snapshot()
-        active={e['key']:e for e in entries if (e['active'] and not e.get('removal_pending') and not self.registry.layouts.blocked(e)) or e['key'] in deferred}
+        active={e['key']:e for e in entries if (e['active'] and not e.get('removal_pending') and not e.get('migration_hold')) or e['key'] in deferred}
         for key in list(self._network_keys - active.keys()):
             await asyncio.to_thread(self.network.stop,key)
             self._network_keys.discard(key)
@@ -377,8 +371,8 @@ class NativeWorker:
                     continue
                 await node['native'].stop()
                 node['player'].stop()
-        statuses=[{**e,'connected':False,'state':'layout_pending','reason':'Resume the pending chime change in the app.'}
-            for e in entries if self.registry.layouts.blocked(e) and e.get('entity_id')]
+        statuses=[{**e,'connected':False,'state':'migration_pending','reason':'Review the unfinished change from the previous version before changing this chime.'}
+            for e in entries if e.get('migration_hold') and e.get('entity_id')]
         for key,entry in active.items():
             if not entry.get('speaker_available',True) and not entry.get('removal_pending'):
                 statuses.append({**entry,'connected':False,'state':'offline',
@@ -406,8 +400,8 @@ class NativeWorker:
                     base=f"http://{self.options['native_ip']}:{self.options.get('media_port',48200)}"
                     player=TrackPlayer(key,entry.get('playback_entity',entry['entity_id']),store,base,
                         group_members=entry.get('members',[entry['entity_id']]),
-                        member_platforms=entry.get('member_platforms',{}),data_dir=data_dir,member_device_ids=entry.get('member_device_ids',{}),chime_only_group=entry.get('chime_only_group',False))
-                    native=NativeChime({**self.options,'timing_key':key,'native_enabled':True,'native_ip':address,
+                        member_platforms=entry.get('member_platforms',{}),data_dir=data_dir,member_device_ids=entry.get('member_device_ids',{}))
+                    native=NativeChime({**self.options,'native_enabled':True,'native_ip':address,
                         'bind_source_ip':True,'display_name':entry['name']},
                         self.registry.identity_dir(entry),
                         on_play=player.submit,ringtone_store=store,
@@ -427,12 +421,7 @@ class NativeWorker:
                     with self.lock:
                         self.nodes[key]={'native':native,'player':player,'store':store,'ip':address}
                 node=self.nodes[key]
-                node['player'].entity_id=entry.get('playback_entity',entry['entity_id'])
-                node['player'].group_members=tuple(entry.get('members',[entry['entity_id']]))
-                node['player'].member_platforms=dict(entry.get('member_platforms',{}))
-                node['player'].member_device_ids=dict(entry.get('member_device_ids',{}))
-                node['player'].chime_only_group=entry.get('chime_only_group',False)
-                node['native'].options['display_name']=entry['name']
+                self._update_player(node,entry)
                 statuses.append({**entry,**node['native'].status(),'ip':address,
                                  'playback':node['player'].status(),'state':'connected' if node['native'].connected else 'awaiting_adoption'})
             except Exception as error:

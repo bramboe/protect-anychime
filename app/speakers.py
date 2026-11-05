@@ -111,56 +111,15 @@ def selection_inventory(inventory, selected, entries=()):
     return rows,selected
 
 
-def visual_groups(rows, *, respect_layout=True):
-    """Group tiles only when eligible HA members agree on their membership.
-
-    Never change HA groups, saved selections or native chime identities.
-    Conflicting/stale reports remain separate until the next refresh.
-    """
-    lookup = {row['entity_id']: row for row in rows}
-    memberships = {}
-    for entity, row in lookup.items():
-        reported = row.get('chime_group_members') or row.get('group') or []
-        memberships[entity] = frozenset([entity, *(e for e in reported if e in lookup)])
-    blocks = []
-    seen = set()
-    for row in rows:
-        entity = row['entity_id']
-        if entity in seen:
-            continue
-        members = memberships[entity]
-        if len(members) < 2 or any(memberships[e] != members for e in members):
-            members = frozenset([entity])
-        if respect_layout and any(lookup[e].get('chime_separate') for e in members):
-            members=frozenset([entity])
-        # Preserve the reported leader first, then discovery order.
-        reported = row.get('chime_group_members') or row.get('group') or []
-        leader = reported[0] if reported and reported[0] in members else entity
-        ordered = [leader] + [r['entity_id'] for r in rows if r['entity_id'] in members and r['entity_id'] != leader]
-        blocks.append({'members': ordered})
-        seen.update(members)
-    return blocks
-
-
-def validate_selection(entities, rows, *, existing=None):
-    if not isinstance(entities, list) or len(entities) > 16 or any(not isinstance(e, str) for e in entities):
-        raise ValueError('Select up to 16 speakers.')
-    if len(set(entities)) != len(entities):
-        raise ValueError('Each speaker can only be selected once.')
-    lookup = {r['entity_id']: r for r in rows}
+def validate_selection(entities,rows,*,existing=None):
+    if (not isinstance(entities,list) or len(entities)>16 or len(set(entities))!=len(entities)
+            or any(not isinstance(e,str) for e in entities)):
+        raise ValueError('Choose up to 16 distinct speakers.')
+    lookup={r['entity_id']:r for r in rows};previous=set(existing or [])
     for entity in entities:
-        if entity not in lookup:
-            raise ValueError('This media player is unavailable or has no supported chime audio route.')
-    selected_set = set(entities)
-    previous=set(existing or [])
-    for block in visual_groups(rows):
-        if selected_set.intersection(block['members']):
-            if not lookup[block['members'][0]].get('available') and not set(block['members']).issubset(previous):
-                raise ValueError('Offline speakers cannot be added. Wait until the speaker is online.')
-            selected_set.update(block['members'])
-    if len(selected_set) > 16:
-        raise ValueError('Select groups containing at most 16 speakers.')
-    return [r['entity_id'] for r in rows if r['entity_id'] in selected_set]
+        if entity not in lookup or (entity not in previous and (lookup[entity].get('available') is False or lookup[entity].get('supported') is False)):
+            raise ValueError('Only an online supported speaker can be added.')
+    return entities
 
 
 def selected(options):

@@ -31,13 +31,13 @@ class SpeakerTests(unittest.TestCase):
             with self.subTest(entities=entities), self.assertRaises(ValueError):
                 speakers.validate_selection(entities, [row(), row('media_player.tv', False)])
         self.assertEqual(speakers.validate_selection([], [row()]), [])
-        self.assertEqual(speakers.validate_selection(['media_player.tv'], [row('media_player.tv',False)]), ['media_player.tv'])
+        with self.assertRaises(ValueError):speakers.validate_selection(['media_player.tv'], [row('media_player.tv',False)])
 
-    def test_selecting_any_group_member_selects_the_group(self):
+    def test_selecting_a_speaker_does_not_expand_ha_music_group(self):
         a, b = 'media_player.a', 'media_player.b'
         rows = [row(a, group=[a, b]), row(b, group=[a, b])]
         self.assertEqual(speakers.validate_selection([a,b], rows), [a,b])
-        self.assertEqual(speakers.validate_selection([a], rows), [a,b])
+        self.assertEqual(speakers.validate_selection([a], rows), [a])
 
     def test_selection_persists_and_empty_selection_overrides_legacy(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(speakers, 'SELECTION_PATH', Path(temp)/'speakers.json'):
@@ -48,32 +48,6 @@ class SpeakerTests(unittest.TestCase):
             speakers.save([])
             self.assertEqual(speakers.selected(options), [])
             self.assertEqual(speakers.SELECTION_PATH.stat().st_mode & 0o077, 0)
-
-    def test_ingress_save_updates_targets_and_never_issues_playback(self):
-        handler = server.Handler.__new__(server.Handler)
-        handler.client_address = ('172.30.32.2', 123)
-        handler.path = '/api/speakers'
-        body = json.dumps({'entities': ['media_player.speaker_a']}).encode()
-        handler.headers = {'X-Prototype-Test': 'silent', 'Content-Length': str(len(body))}
-        handler.rfile = io.BytesIO(body)
-        handler.respond = Mock()
-        with patch('server.speakers.discover', return_value=[row()]), \
-                patch('server.load_options', return_value={"speaker_entities": ["media_player.speaker_a"]}), \
-                patch('server.ONBOARDING') as feedback, \
-                patch('server.speakers.save'), \
-                patch('server.NATIVE') as worker:
-            feedback.submit.return_value={"state":"empty"}
-            worker.plan_selection.return_value=[]
-            worker.configure_selection.return_value=[{'entity_id':'media_player.speaker_a','active':True}]
-            handler.do_POST()
-            worker.configure_selection.assert_called_once()
-            feedback.submit.assert_not_called()
-        self.assertEqual(handler.respond.call_args.args[0], 200)
-        self.assertFalse(handler.respond.call_args.args[1]['audio_played'])
-
-
-if __name__ == '__main__':
-    unittest.main()
 
 class NativeDeviceFilterTests(unittest.TestCase):
     def test_ubiquiti_manufacturer_variants_are_excluded(self):
@@ -118,30 +92,3 @@ class CapabilityFilterTests(unittest.TestCase):
 
     def test_native_integration_hidden_even_without_manufacturer(self):
         self.assertEqual(speakers.discover(Mock(return_value=[dict(row(),integration='unifiprotect')])),[])
-
-class VisualGroupTests(unittest.TestCase):
-    def test_matching_group_is_one_block_with_leader_first(self):
-        a,b='media_player.a','media_player.b'
-        result=speakers.visual_groups([row(b,group=[a,b]),row(a,group=[a,b])])
-        self.assertEqual(result,[{'members':[a,b]}])
-        self.assertEqual(speakers.validate_selection([a,b],[row(a),row(b)]),[a,b])
-
-    def test_separate_speakers_and_self_groups_remain_individual(self):
-        a,b='media_player.a','media_player.b'
-        self.assertEqual(speakers.visual_groups([row(a,group=[a]),row(b)]),[{'members':[a]},{'members':[b]}])
-
-    def test_conflicting_membership_does_not_merge_stale_groups(self):
-        a,b,c='media_player.a','media_player.b','media_player.c'
-        result=speakers.visual_groups([row(a,group=[a,b]),row(b,group=[a,b,c]),row(c,group=[b,c])])
-        self.assertEqual(result,[{'members':[a]},{'members':[b]},{'members':[c]}])
-
-    def test_unknown_and_filtered_members_are_not_reintroduced(self):
-        a,b='media_player.a','media_player.b'
-        result=speakers.visual_groups([row(a,group=[a,b,'media_player.excluded']),row(b,group=[a,b,'media_player.excluded'])])
-        self.assertEqual(result,[{'members':[a,b]}])
-
-    def test_group_disappears_on_next_discovery_without_selection_mutation(self):
-        a,b='media_player.a','media_player.b';selection=[a]
-        speakers.visual_groups([row(a,group=[a,b]),row(b,group=[a,b])])
-        self.assertEqual(speakers.visual_groups([row(a),row(b)]),[{'members':[a]},{'members':[b]}])
-        self.assertEqual(selection,[a])

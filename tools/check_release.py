@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 
 ROOT=Path(__file__).resolve().parents[1]
-PRIVATE_NAMES={'options.json','managed-settings.json','speakers.json','chimes.json','identity.json',
+PRIVATE_NAMES={'options.json','managed-settings.json','speakers.json','chimes.json','chime-schema.json','identity.json',
     'tracks.json','latency-calibration.json','latency-delays.json','chime-layout.json','product-links.json','protect-management.json','protect-management-trust.json','configuration-before-managed-settings.json'}
 BLOCKED_SUFFIXES={'.pem','.key','.mp3','.ogg','.wav','.log','.pyc','.pyo'}
 

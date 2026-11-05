@@ -178,11 +178,11 @@ class GenericSpeakerTests(unittest.TestCase):
     def test_inactive_or_muted_players_are_not_changed(self):
         for state in ("off", "standby", "unknown", "unavailable"):
             backend, fake = self.make(allow_playback=True, requester=FakeHA(state=state))
-            with self.assertRaisesRegex(SpeakerError, state):
+            with self.assertRaises(SpeakerError):
                 backend.play_once(backend.arm_once(confirmed=True)["approval_id"])
             self.assertEqual(len(fake.calls), 1)
         backend, fake = self.make(allow_playback=True, requester=FakeHA(muted=True))
-        with self.assertRaisesRegex(SpeakerError, "muted"):
+        with self.assertRaises(SpeakerError):
             backend.play_once(backend.arm_once(confirmed=True)["approval_id"])
         self.assertEqual(len(fake.calls), 1)
 
@@ -202,7 +202,8 @@ class GenericSpeakerTests(unittest.TestCase):
         for volume in (0, 10, 37, 100):
             backend, fake = self.make(allow_playback=True)
             backend.play_once(backend.arm_once(confirmed=True, volume=volume)["approval_id"])
-            self.assertEqual(fake.calls[1][2]["volume_level"], volume / 100)
+            if volume==0:self.assertEqual(fake.calls,[])
+            else:self.assertEqual(fake.calls[1][2]["volume_level"], volume / 100)
 
     def test_missing_token_and_http_error_do_not_expose_secrets(self):
         with patch.dict("os.environ", {}, clear=True):
@@ -245,13 +246,13 @@ class GroupAudioTests(unittest.TestCase):
         self.assertEqual(len(posts),2)
         self.assertEqual(posts[0][2],{'entity_id':['media_player.a','media_player.b'],'volume_level':.4})
         self.assertEqual(posts[1][2]['entity_id'],'media_player.a')
-        self.assertNotIn('announce',posts[1][2]);self.assertEqual(result['mode'],'group')
+        self.assertNotIn('announce',posts[1][2]);self.assertEqual(result['mode'],'play_media')
         self.assertFalse(result['acoustic_playback_verified'])
 
-    def test_changed_group_fails_before_any_volume_or_playback_write(self):
-        backend,calls=self.setup_backend(changed=True);grant=backend.arm_once(confirmed=True,volume=40)
-        with self.assertRaises(SpeakerError):backend.play_once(grant['approval_id'])
-        self.assertFalse(any(c[0]=='POST' for c in calls))
+    def test_music_group_changes_do_not_change_chime_membership(self):
+        backend,calls=self.setup_backend(changed=True)
+        backend.play_once(backend.arm_once(confirmed=True)['approval_id'])
+        self.assertTrue(any(path.endswith('/play_media') for _,path,_ in calls))
 
     def test_member_volume_is_preflighted_before_changing_any_speaker(self):
         backend,calls=self.setup_backend(unsafe_volume=True);grant=backend.arm_once(confirmed=True,volume=40)

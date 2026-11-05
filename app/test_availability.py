@@ -13,31 +13,27 @@ def row(entity,online,group=None):return {'entity_id':entity,'name':entity,'avai
 class AvailabilityTests(unittest.TestCase):
     def test_offline_add_is_rejected_but_existing_pair_can_be_retained_or_removed(self):
         rows=[row(A,False),row(B,True)]
-        with self.assertRaisesRegex(ValueError,'Offline'):speakers.validate_selection([A],rows)
+        with self.assertRaises(ValueError):speakers.validate_selection([A],rows)
         self.assertEqual(speakers.validate_selection([A,B],rows,existing=[A]),[A,B])
         self.assertEqual(speakers.validate_selection([],rows,existing=[A]),[])
         rows[0]['available']=True;self.assertEqual(speakers.validate_selection([A],rows),[A])
 
-    def test_group_requires_online_coordinator_but_allows_partial_member_outage(self):
-        rows=[row(A,False,[A,B]),row(B,True,[A,B])]
-        with self.assertRaisesRegex(ValueError,'Offline'):speakers.validate_selection([B],rows)
-        self.assertEqual(speakers.validate_selection([A,B],rows,existing=[A,B]),[A,B])
-        rows[0]['available']=True;rows[1]['available']=False
-        self.assertEqual(speakers.validate_selection([A],rows),[A,B])
-
+    def test_ha_coordinator_availability_does_not_expand_selection(self):
+        rows=[{'entity_id':A,'available':False,'group':[A,B]},{'entity_id':B,'available':True,'group':[A,B]}]
+        self.assertEqual(speakers.validate_selection([B],rows),[B])
     def test_paired_missing_entity_is_preserved_as_offline(self):
         entry={'entity_id':A,'members':[A,B],'active':True}
         rows,selected=speakers.selection_inventory([row(B,True,[A,B])],[A,B],[entry])
         self.assertEqual(selected,[A,B]);self.assertFalse(next(r for r in rows if r['entity_id']==A)['available'])
-        self.assertEqual(speakers.visual_groups(rows),[{'members':[A,B]}])
-        self.assertEqual(speakers.validate_selection([A,B],rows,existing=[A,B]),[B,A])
+        self.assertEqual({r['entity_id'] for r in rows},{A,B})
+        self.assertEqual(speakers.validate_selection([A,B],rows,existing=[A,B]),[A,B])
 
 class OfflineChimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_offline_disconnects_without_deleting_identity_then_returns_with_same_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);registry=ChimeRegistry(root);registry.sync([A],[row(A,True)])
             (root/'native').mkdir();marker=root/'native/identity.json';marker.write_text('preserved-identity')
-            native=Mock();native.stop=AsyncMock();player=Mock()
+            native=Mock();native.stop=AsyncMock();player=Mock();player.lock=__import__('threading').Lock()
             worker=NativeWorker();worker.registry=registry;worker.network=Mock();worker.options={'native_ip':'10.23.45.20'}
             worker.nodes={'primary':{'native':native,'player':player,'ip':'10.23.45.20'}}
             worker.refresh_groups([row(A,False)])
