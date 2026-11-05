@@ -1,3 +1,8 @@
+# 0.4.1 menu1
+
+- Keep the open chime menu fixed in the viewport while the page scrolls. Prevent polling from replacing its trigger underneath it, and clamp it to the visible viewport after resizing or zooming.
+- Close the menu on an outside pointer click/tap. Keep it open for interactions inside, including slider drags that end outside. Retain Escape dismissal and keyboard focus without jumping the page.
+
 # 0.4.0 sets1
 
 - Make each chime a fixed, user-chosen speaker set independent of Home Assistant music groups. Keep existing keys, native identities, adoption, pairing and ringtone storage during migration and member edits.

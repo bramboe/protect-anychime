@@ -27,7 +27,7 @@ from manual_timing import ManualTiming
 
 ROOT = Path(__file__).resolve().parent
 NATIVE = NativeWorker()
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 DEFAULT_PORT = 48200
 SELECTION_LOCK = NATIVE.selection_lock
 DATA_ROOT = Path(os.environ.get("ANYCHIME_DATA_DIR", "/data"))
@@ -229,7 +229,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(200, connection.public_status(load_options()))
         if route == "/api/status":
             options = load_options()
-            return self.respond(200, {"version": VERSION, "build": "sets1",
+            return self.respond(200, {"version": VERSION, "build": "menu1",
                 "mode": "protect_controlled", "native": NATIVE.status(),
                 "connection": connection.public_status(options),
                 "management": MANAGEMENT.status(options.get('controller_ip','')),
@@ -446,7 +446,7 @@ def run_server():
         options = MANAGEMENT.migrate_to_configuration(options, configuration.self_options)
         MANAGEMENT.configure(options)
         NATIVE.start(options)
-        print(f"Protect AnyChime {VERSION} (sets1): web interface on {port}; playback controlled by Protect.", flush=True)
+        print(f"Protect AnyChime {VERSION} (menu1): web interface on {port}; playback controlled by Protect.", flush=True)
         server.serve_forever()
     finally:
         try:
