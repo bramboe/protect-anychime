@@ -102,7 +102,8 @@ class MembershipHTTPTests(unittest.TestCase):
             with patch.object(server,'NATIVE',worker),patch('server.speakers.discover',return_value=ROWS),patch('server.load_options',return_value={'controller_ip':'10.23.45.1'}),patch.object(server,'MANAGEMENT') as manager:
                 h=self.handler(body);h.do_POST();self.assertEqual(h.respond.call_args.args[0],400);manager.remove_virtual_chime.assert_not_called()
                 h=self.handler({**body,'confirm_last':True});h.do_POST();self.assertEqual(h.respond.call_args.args[0],200)
-                manager.remove_virtual_chime.assert_called_once_with('10.23.45.1','primary',worker)
+                manager.remove_virtual_chime.assert_not_called()
+                self.assertEqual(worker.registry.selected_entities(),[])
     def test_member_add_and_detach_never_invoke_protect_or_audio(self):
         with tempfile.TemporaryDirectory() as d:
             worker=NativeWorker();worker.registry=ChimeRegistry(d);worker.registry.transfer(A,None,ROWS)

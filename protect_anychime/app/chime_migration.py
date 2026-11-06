@@ -49,7 +49,7 @@ class ChimeMigration:
         historical=False
         for entry in entries:
             identity=self.directory/'native'/'identity.json' if entry['key']=='primary' else self.directory/'identities'/entry['key']/'identity.json'
-            stale=not entry['active'] and entry.get('entity_id') and entry.get('removal_source')!='protect' and identity.is_file()
+            stale=not entry['active'] and not entry.get('removal_requested') and entry.get('entity_id') and entry.get('removal_source')!='protect' and identity.is_file()
             historical=historical or bool(stale)
             if (stale or entry['key'] in keys or entry['key'] in conflicts or targets.intersection(entry.get('members',[]))):
                 entry['migration_hold']=True

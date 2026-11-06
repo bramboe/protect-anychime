@@ -113,8 +113,8 @@ class ChimeRegistry:
                 return self.snapshot()
             return self._atomic(update)
 
-    def transfer(self,entity,target_key,rows):
-        """Add/move a member in one registry write; never delete a Protect chime."""
+    def transfer(self,entity,target_key,rows,*,remove_empty=False,removal_controller=None):
+        """Atomically move membership; confirmed empty sources become cleanup requests."""
         self._validate_entities([entity])
         if target_key is not None and (not isinstance(target_key,str) or not re.fullmatch(r'primary|[a-f0-9]{24}',target_key)):
             raise ValueError('Choose a valid destination chime.')
@@ -128,27 +128,37 @@ class ChimeRegistry:
             if source and target and source['key']==target['key']:return self.snapshot()
             if source:
                 self._editable(source)
-                if len(source['members'])==1:
+                if len(source['members'])==1 and not (remove_empty is True and target is not None):
                     raise ValueError('This is the last speaker in its chime. Remove that chime through the confirmed Protect flow first, then add the speaker to its destination.')
             if target:self._editable(target)
             if not source and len(self.selected_entities())>=16:raise ValueError('Choose up to 16 speakers.')
             def update():
-                if source:source['members'].remove(entity)
+                empty=bool(source and len(source['members'])==1)
+                if empty:
+                    source.update(active=False,removal_pending=True,removal_requested=True)
+                    if removal_controller:source['removal_controller']=removal_controller
+                elif source:source['members'].remove(entity)
                 destination=target or self._new(entity)
                 if entity not in destination['members']:destination['members'].append(entity)
-                if source:self._metadata(source,rows)
+                if source and not empty:self._metadata(source,rows)
                 self._metadata(destination,rows)
                 return self.snapshot()
             return self._atomic(update)
 
-    def detach(self,key,entity,rows):
+    def detach(self,key,entity,rows=None):
         with self.lock:
             entry=next((e for e in self.entries if e['key']==key and e['active']),None)
             if not entry or entity not in entry['members']:raise ValueError('The speaker is no longer in this chime.')
             self._editable(entry)
             if len(entry['members'])==1:raise ValueError('Confirm removal of the last speaker through Protect.')
             def update():
-                entry['members'].remove(entity);self._metadata(entry,rows);return self.snapshot()
+                entry['members'].remove(entity)
+                if rows is not None:self._metadata(entry,rows)
+                else:
+                    entry['entity_id']=entry['members'][0];entry['playback_entity']=entry['entity_id']
+                    for name in ('member_platforms','member_device_ids'):
+                        entry[name]={e:v for e,v in entry.get(name,{}).items() if e in entry['members']}
+                return self.snapshot()
             return self._atomic(update)
 
     def plan(self,entities,rows=None):
@@ -156,6 +166,18 @@ class ChimeRegistry:
         clone.directory=self.directory;clone.path=self.path;clone.lock=threading.RLock()
         clone.entries=self.snapshot();clone._dry_run=True;clone.migration=self.migration
         return clone.sync(entities,rows)
+
+    def request_removal(self,key,controller=None):
+        """Unselect immediately; retain identity until controller cleanup is confirmed."""
+        with self.lock:
+            entry=next((e for e in self.entries if e['key']==key),None)
+            if entry is None or not entry.get('entity_id'):
+                raise ValueError('This chime has already been removed.')
+            def update():
+                entry.update(active=False,removal_pending=True,removal_requested=True)
+                if controller:entry.setdefault('removal_controller',controller)
+                return self.snapshot()
+            return self._atomic(update)
 
     def mark_removal_pending(self, key):
         with self.lock:

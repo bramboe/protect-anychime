@@ -24,7 +24,7 @@ from manual_timing import ManualTiming
 
 ROOT = Path(__file__).resolve().parent
 NATIVE = NativeWorker()
-VERSION = "0.4.7"
+VERSION = "0.4.8"
 DEFAULT_PORT = 48200
 SELECTION_LOCK = NATIVE.selection_lock
 DATA_ROOT = Path(os.environ.get("ANYCHIME_DATA_DIR", "/data"))
@@ -88,6 +88,19 @@ def remove_confirmed_chime(host,key):
     if entry and entry.get('removal_pending'):
         return MANAGEMENT.remove_virtual_chime(host,key,NATIVE,allow_absent=True)
     return MANAGEMENT.remove_virtual_chime(host,key,NATIVE)
+
+
+def cleanup_requested_chime(key):
+    if not SELECTION_LOCK.acquire(blocking=False):return {'retry_later':True}
+    try:
+        options=load_options();host=options.get('controller_ip','')
+        entry=next((e for e in NATIVE.registry.snapshot() if e['key']==key),None) if NATIVE.registry else None
+        if not entry or (entry.get('removal_controller') and entry['removal_controller']!=host):return {'retry_later':True}
+        if not MANAGEMENT.status(host).get('ready'):return {'retry_later':True}
+        return remove_confirmed_chime(host,key)
+    finally:SELECTION_LOCK.release()
+
+NATIVE.removal_handler=cleanup_requested_chime
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -184,7 +197,7 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/":
             return self.respond(200, (ROOT / "index.html").read_bytes(),
                                 "text/html; charset=utf-8")
-        if route in ('/assets/timing.js','/assets/speakers.js','/assets/chime-status.js'):
+        if route in ('/assets/timing.js','/assets/speakers.js','/assets/chime-status.js','/assets/dialog-host.js'):
             return self.respond(200,(ROOT/'assets'/route.rsplit('/',1)[1]).read_bytes(),'application/javascript')
         if route == "/assets/sortable.min.js":
             return self.respond(200,(ROOT/'assets'/'sortable.min.js').read_bytes(),'application/javascript')
@@ -276,7 +289,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload,dict):
                     raise ValueError("Invalid management request.")
-                options = load_options()
+                options = {} if route.endswith('/remove') else load_options()
                 if route.endswith('/inspect'):
                     return self.respond(200,MANAGEMENT.inspect_previous_chimes(options.get('controller_ip',''),NATIVE))
                 key = payload.get('key')
@@ -289,9 +302,12 @@ class Handler(BaseHTTPRequestHandler):
                     elif route.endswith('/prepare-adoption'):
                         result = MANAGEMENT.prepare_adoption(options.get('controller_ip',''),key,NATIVE)
                     else:
-                        result = remove_confirmed_chime(options.get('controller_ip',''),key)
+                        result = NATIVE.request_removal(key)
                 return self.respond(200,result)
             except (ValueError,OSError,TimeoutError) as error:
+                if route.endswith('/remove') and isinstance(error,OSError):
+                    print('Chime removal could not be saved ('+type(error).__name__+'). Check app storage permissions and free space.',flush=True)
+                    return self.respond(400,{'error':'App storage could not be updated. Check the app logs.'})
                 message = str(error) if isinstance(error,ValueError) else 'Protect management could not be completed.'
                 return self.respond(400,{"error":message})
         if route in ("/api/migration/export", "/api/migration/import"):
@@ -355,6 +371,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not 0<length<=8192:raise ValueError('Invalid membership request.')
                 body=json.loads(self.rfile.read(length))
                 if not isinstance(body,dict) or body.get('confirmed') is not True:raise ValueError('Confirm this chime action.')
+                cleanup_key=None
                 with SELECTION_LOCK:
                     registry=NATIVE.registry
                     if registry is None:raise ValueError('The app is starting.')
@@ -362,24 +379,39 @@ class Handler(BaseHTTPRequestHandler):
                         registry.migration.finish(registry.snapshot())
                     else:
                         action=body.get('action');entity=body.get('entity_id')
-                        rows=speakers.discover()
                         if action=='remove':
                             entry=next((e for e in registry.snapshot() if e['key']==body.get('key') and e['active']),None)
                             if not entry or entity not in entry['members']:raise ValueError('This speaker is no longer in the chime.')
                             if len(entry['members'])==1:
                                 if body.get('confirm_last') is not True:raise ValueError('Confirm Protect removal of this chime’s last speaker.')
-                                options=load_options()
-                                remove_confirmed_chime(options.get('controller_ip',''),entry['key'])
-                            else:registry.detach(entry['key'],entity,rows)
+                                cleanup_key=entry['key'];NATIVE.request_removal(entry['key'])
+                            else:
+                                try:rows=speakers.discover()
+                                except (SpeakerError,ValueError,OSError):rows=None
+                                registry.detach(entry['key'],entity,rows)
                         elif action in ('add','move'):
+                            rows=speakers.discover()
                             if registry.migration.status(registry.snapshot())['required']:raise ValueError('Finish reviewing the older chime change first.')
-                            registry.transfer(entity,body.get('target_key'),rows)
+                            source=next((e for e in registry.snapshot() if e['active'] and entity in e['members']),None)
+                            target=body.get('target_key')
+                            empty=bool(source and len(source['members'])==1 and target and target!=source['key'])
+                            if empty and body.get('confirm_source_removal') is not True:
+                                raise ValueError('Confirm removal of the empty source chime before moving its last speaker.')
+                            if empty and body.get('source_key')!=source['key']:
+                                raise ValueError('The source chime changed. Refresh and confirm the move again.')
+                            registry.transfer(entity,target,rows,remove_empty=empty,removal_controller=NATIVE.options.get('controller_ip'))
+                            if empty:
+                                cleanup_key=source['key'];NATIVE.request_removal(source['key'])
                         else:raise ValueError('Choose add, move or remove.')
                     NATIVE.refresh_players()
                     try:speakers.save(registry.selected_entities(),path=registry.directory/'speakers.json')
                     except OSError:pass
-                return self.respond(200,{'selected':registry.selected_entities(),'audio_played':False})
-            except (ValueError,OSError,SpeakerError) as error:return self.respond(400,{'error':str(error) if isinstance(error,ValueError) else 'Could not save the chime change.'})
+                return self.respond(200,{'selected':registry.selected_entities(),'cleanup_pending':sum(bool(e['key']==cleanup_key and e.get('removal_requested') and e.get('removal_pending')) for e in registry.snapshot()),'audio_played':False})
+            except (ValueError,OSError,SpeakerError) as error:
+                if isinstance(error,OSError):
+                    print('Chime membership could not be saved ('+type(error).__name__+'). Check app storage permissions and free space.',flush=True)
+                    return self.respond(400,{'error':'App storage could not be updated. Check the app logs.'})
+                return self.respond(400,{'error':str(error) if isinstance(error,ValueError) else 'Could not save the chime change.'})
         return self.respond(404, {"error": "Not found"})
 
 

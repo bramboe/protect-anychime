@@ -1,6 +1,6 @@
 # Protect AnyChime project
 
-Source app version: 0.4.7. Slug: `protect_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
+Source app version: 0.4.8. Slug: `protect_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
 
 ## Chimes and speakers
 
@@ -14,7 +14,7 @@ Membership API: `POST /api/chimes/members`. Add/move uses a selected entity and 
 
 The deployment model remains a Home Assistant app with host networking, ingress/media port 48200 and owned per-device management forwarding. The existing NET_ADMIN/NET_RAW requirements and installation-specific console trust remain. Account settings stay in HA app configuration. Network portability beyond the live-tested HA OS installation remains a separate validation task.
 
-Verification uses fake HA/Protect request boundaries and synthetic media bytes. Tests cover stable membership keys, member moves/detachment, last-member refusal/confirmed removal, rollback on persistence failure, fixed membership across HA group changes, migration with open transitions, old backup import, and native identity/ringtone preservation. Source hygiene is checked from the repository root with `python3 tools/check_release.py`. The root contains repository metadata and the MIT license; the installable app is in `protect_anychime/`. No source commit is pushed automatically.
+Verification uses fake HA/Protect request boundaries and synthetic media bytes. Tests cover stable membership keys, member moves/detachment, last-member move confirmation and queued removal, rollback on persistence failure, fixed membership across HA group changes, migration with open transitions, old backup import, and native identity/ringtone preservation. Source hygiene is checked from the repository root with `python3 tools/check_release.py`. The root contains repository metadata and the MIT license; the installable app is in `protect_anychime/`. No source commit is pushed automatically.
 
 ## Timing
 
@@ -39,3 +39,11 @@ All interface and administrative API requests require the actual Supervisor ingr
 With automatic adoption enabled and a local Protect account configured, new chimes show blue **Adopting in Protect**. Once adopted and connected, an unpaired chime shows orange **Configure chime in Protect**. Pair it with a doorbell in Protect and choose its sound, volume and repetitions there. Green **Active as chime** requires a confirmed doorbell pairing and a live chime connection; default sound/volume settings count as configured. This status does not prove acoustic playback.
 
 Pairing is read from Protect for verified installation-owned identities approximately every thirty seconds, with up to another interface refresh interval before the label changes. Missing fields stay unknown. A temporary failed refresh retains the last confirmed pairing for up to five minutes while the live chime connection is monitored separately. A warning requires at least three consecutive failures spanning ninety seconds, or evidence older than five minutes. Failed checks retry after 15, 30 and then 60 seconds; successful checks reset the failure episode. No doorbell identifiers or settings are added to the UI. Automatic adoption disabled keeps the orange **Adopt chime in Protect** instruction. Offline, migration and removal states take precedence.
+
+## Compact chime cards and action feedback
+
+Chime cards start collapsed on every page load, return visit and restored page. Only the title, expansion arrow and actions menu remain visible. Expand/collapse choices stay in memory through background status polls; they are not stored as a preference. A collapsed heading accepts dragged speakers. **Add speaker** also offers online speakers already assigned to another chime. Moving its last speaker requires an in-app confirmation explaining that the empty source is removed while the destination keeps its identity, pairing, ringtones and settings. HA music groups remain unchanged.
+
+Remove and × work during preparation, adoption, offline conditions and management outages. They immediately remove membership locally; an unused chime with no saved identity can be discarded without a Protect request. Existing identities become inactive cleanup records. Only these explicit requests are automatically retried against their original console, with authenticated identity ownership checks and confirmed absence/deletion before final cleanup. Historical unconfirmed records are not automatically deleted. A visible pending-cleanup notice explains when Protect or account setup is still needed.
+
+Actions show immediate progress, prevent duplicate submissions, and report completion or an orange error in a viewport-visible message. Membership errors are also shown on the affected card. Dialogs use in-app confirmation, with an explicit Cancel, rather than browser confirmation prompts. Refreshing speakers, checking/saving a console connection, timing requests, product-information saves and explicit test requests show progress. Tests remain opt-in at the requested volume; no opening, rendering, collapsing or saving operation starts audio.

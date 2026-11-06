@@ -214,10 +214,11 @@ class ManagementApiTests(unittest.TestCase):
 
     def test_confirmed_delete_passes_only_owned_key_not_browser_device_id(self):
         handler=self.handler('/api/chimes/remove',{'key':'primary','confirmed':True,'id':'foreign-id'})
-        with patch.object(server,'load_options',return_value={'controller_ip':HOST}),patch.object(server,'MANAGEMENT') as manager:
-            manager.remove_virtual_chime.return_value={'removed':True,'audio_played':False}
+        with patch.object(server,'load_options',return_value={'controller_ip':HOST}),patch.object(server,'MANAGEMENT') as manager,patch.object(server,'NATIVE') as worker:
+            worker.request_removal.return_value={'removed_locally':True,'audio_played':False}
             handler.do_POST()
-        manager.remove_virtual_chime.assert_called_once_with(HOST,'primary',server.NATIVE)
+        worker.request_removal.assert_called_once_with('primary')
+        manager.remove_virtual_chime.assert_not_called()
         self.assertEqual(handler.respond.call_args.args[0],200)
 
 class AsyncResponse:

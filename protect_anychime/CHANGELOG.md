@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.8
+
+- Keep the chime menu fixed in the outer viewport while the page remains scrollable. Close on an outside click or Escape, without dismissing on touch scrolling or slider drags.
+
+- Collapse chime cards by default on page loads and revisits, retaining manual expansion through background polling. Keep the title, arrow and menu visible; support drops onto collapsed headings.
+- Offer speakers assigned to other chimes in Add speaker. Moving a last member confirms removal of the empty source and preserves the receiving chime's identity and Protect settings.
+- Allow local removal at every setup stage. Queue authenticated Protect cleanup when unavailable, preserve the identity until deletion is confirmed, and never redirect cleanup to another console.
+- Replace browser confirmations with in-app dialogs. Show visible progress, completion, pending cleanup and contextual orange errors; prevent duplicate submissions and explain unavailable tests.
+- Add loading/saving feedback to refresh, connection, timing, product and test actions; bound repeated cleanup log messages.
+
 ## 0.4.7
 
 - Align the internal app slug, repository app folder and AppArmor profile with Protect AnyChime: `protect_anychime`.

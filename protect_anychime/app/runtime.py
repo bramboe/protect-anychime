@@ -26,6 +26,7 @@ class NativeWorker:
         self.selection_lock=threading.RLock()
         self.error=None
         self.cleanup_error=None
+        self._cleanup_log_after=0
         self._purge_locks={}
         self.thread=None
         self.options={}
@@ -34,6 +35,8 @@ class NativeWorker:
         self._discovery=[]
         self.diagnostics={}
         self.loop=None
+        self.removal_handler=None
+        self._removal_retries={}
         self.configuration_checker=None
         self._configuration_state={}
         self._configuration_after=0
@@ -103,7 +106,7 @@ class NativeWorker:
         if not self.selection_lock.acquire(blocking=False):
             return self.registry.snapshot()
         try:
-            if any(e.get('removal_pending') for e in self.registry.snapshot()):
+            if any(e.get('removal_pending') and not e.get('removal_requested') for e in self.registry.snapshot()):
                 return self.registry.snapshot()
             return self.registry.sync(self.registry.selected_entities(),rows,user_change=False)
         finally:
@@ -144,6 +147,56 @@ class NativeWorker:
             elif key in extra:
                 raise ValueError('The saved identity for this previous chime is unavailable.')
         return targets
+
+    def request_removal(self,key):
+        if self.registry is None:raise ValueError('The app is still starting. Refresh and try again.')
+        current=next((e for e in self.registry.snapshot() if e['key']==key),None)
+        if not current or not current.get('entity_id'):return {'removed_locally':True,'protect_cleanup_pending':False,'audio_played':False}
+        self.registry.request_removal(key,controller=self.options.get('controller_ip'))
+        # Reject future rings immediately, even if stopping the native task is slow.
+        node=self.nodes.get(key)
+        if node:node['player'].stop_event.set()
+        suspended=True
+        try:self.begin_removal(key)
+        except Exception as error:
+            suspended=False
+            print('Chime removal queued; native shutdown pending ('+type(error).__name__+').',flush=True)
+        entry=next((e for e in self.registry.snapshot() if e['key']==key),None)
+        if entry is None or not entry.get('entity_id'):return {'removed_locally':True,'protect_cleanup_pending':False,'audio_played':False}
+        if suspended and entry and not self.registry.identity_dir(entry).exists() and key not in self.nodes:
+            try:
+                self.registry.deactivate_from_protect(key)
+                self.registry.purge_removed(key)
+                return {'removed_locally':True,'protect_cleanup_pending':False,'audio_played':False}
+            except OSError:
+                print('Local chime cleanup is waiting for writable app storage.',flush=True)
+        return {'removed_locally':True,'protect_cleanup_pending':True,'audio_played':False}
+
+    async def _process_requested_removals(self):
+        if self.registry is None:return
+        entries=[e for e in self.registry.snapshot() if e.get('removal_requested') and e.get('removal_pending')]
+        self._removal_retries={k:v for k,v in self._removal_retries.items() if any(e['key']==k for e in entries)}
+        for entry in entries:
+            key=entry['key'];now=time.monotonic();attempt=self._removal_retries.get(key,{})
+            if now<attempt.get('next',0):continue
+            if entry.get('removal_controller') and entry['removal_controller']!=self.options.get('controller_ip'):
+                if not attempt.get('scope_warned'):print('Protect cleanup is waiting for the original console. The chime is removed locally.',flush=True)
+                self._removal_retries[key]={'next':now+60,'scope_warned':True};continue
+            try:
+                if not self.registry.identity_dir(entry).exists():
+                    self.registry.deactivate_from_protect(key);self.registry.purge_removed(key);continue
+                if self.removal_handler is None:continue
+                result=await asyncio.to_thread(self.removal_handler,key)
+                if result.get('retry_later'):
+                    self._removal_retries[key]={'next':now+30};continue
+                self._removal_retries.pop(key,None)
+            except Exception as error:
+                count=attempt.get('count',0)+1
+                self._removal_retries[key]={'next':now+min(300,15*2**min(count-1,5)),'count':count,'logged':attempt.get('logged',float('-inf'))}
+                if now-attempt.get('logged',float('-inf'))>=300:
+                    kind=getattr(error,'kind',type(error).__name__)
+                    print('Protect chime cleanup pending ('+kind+'). The speaker is already removed locally; retrying automatically.',flush=True)
+                    self._removal_retries[key]['logged']=now
 
     def begin_removal(self, key):
         self.registry.mark_removal_pending(key)
@@ -260,7 +313,10 @@ class NativeWorker:
                 except Exception:
                     deferred.add(entry['key'])
                     self.cleanup_error='A removed chime could not be fully cleaned up. Check the app logs.'
-                    print('Confirmed chime cleanup pending; identity remains disabled.',flush=True)
+                    now=time.monotonic()
+                    if now>=self._cleanup_log_after:
+                        print('Confirmed chime cleanup pending; identity remains disabled. Check app storage permissions and free space.',flush=True)
+                        self._cleanup_log_after=now+300
         return deferred
 
     def _descriptors(self):
@@ -301,6 +357,7 @@ class NativeWorker:
                     except Exception:
                         print('Speaker metadata refresh unavailable; keeping saved chime sets.',flush=True)
                 await self._reconcile(data_dir)
+                await self._process_requested_removals()
                 await self._auto_adopt_new_chimes()
                 await self._repair_stale_adoptions()
                 await self._sync_names()
