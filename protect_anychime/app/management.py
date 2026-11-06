@@ -16,6 +16,7 @@ import threading
 import time
 
 import aiohttp
+import connection
 from connection import fetch_certificate, lan_ip
 from native import _PinnedConnector
 
@@ -78,7 +79,7 @@ class ProtectSession:
             and set(body)=={'chimes'} and isinstance(body['chimes'],dict) and len(body['chimes'])==1
             and all(isinstance(k,str) and re.fullmatch('[0-9a-f]{24}',k) and v=={} for k,v in body['chimes'].items()))
         valid = (adopt or play or rename or (login and method == 'POST' and path == '/api/auth/login')
-            or (method == 'GET' and path == '/proxy/protect/api/chimes')
+            or (method == 'GET' and path in ('/proxy/protect/api/chimes', '/proxy/protect/api/nvr'))
             or (method == 'DELETE' and re.fullmatch('/proxy/protect/api/chimes/[0-9a-f]{24}', path)))
         if not valid:
             raise ManagementError('Unsupported Protect management operation.')
@@ -111,6 +112,22 @@ class ProtectSession:
         if not isinstance(data, list) or len(data) > 512 or any(not isinstance(x, dict) for x in data):
             raise ManagementError('Protect did not return a valid chime list.')
         return data
+
+    async def console_info(self):
+        """Display name, model and Protect version, so the user recognises the console."""
+        try:
+            data = await self.request('GET', '/proxy/protect/api/nvr')
+        except ManagementError:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        def clean(value):
+            if not isinstance(value, str) or any(ord(c) < 32 for c in value):
+                return ''
+            return value.strip()[:80]
+        return {'console_name': clean(data.get('name')),
+                'console_model': clean(data.get('marketName') or data.get('type')),
+                'console_version': clean(data.get('version'))}
 
     async def remove(self, device_id):
         if not isinstance(device_id, str) or not re.fullmatch('[0-9a-f]{24}', device_id):
@@ -170,8 +187,8 @@ class ProtectManagement:
             raise ManagementError('Reconnect your Protect account.')
         return data
 
-    def migrate_to_configuration(self, options, requester):
-        """Move this app's previously entered account into its own HA options."""
+    def migrate_legacy_account(self, options):
+        """Move an account saved by older versions into this app's private settings."""
         if not self.path.exists():
             return options
         try:
@@ -180,26 +197,49 @@ class ProtectManagement:
             return options
         if not old or old['host'] != options.get('controller_ip'):
             return options
-        try:
-            current = requester('GET').get('options')
-            if not isinstance(current,dict):
-                raise ManagementError('App options could not be read.')
-            if current.get('protect_username') or current.get('protect_password'):
-                # User-entered configuration always takes precedence.
-                result = {**options,**{k:current[k] for k in ('protect_username','protect_password') if k in current}}
-                return result
-            updated = {**current,'protect_username':old['username'],'protect_password':old['password']}
-            requester('POST',{'options':updated})
-            verified = requester('GET').get('options',{})
-            if any(verified.get(k)!=updated[k] for k in ('protect_username','protect_password')):
-                raise ManagementError('App option migration has not completed.')
+        if options.get('protect_username') and options.get('protect_password'):
+            # A newer account already exists; keep only the old certificate pin.
             self._save_connection_trust(old)
+            return options
+        try:
+            with connection.LOCK:
+                managed = connection.read_managed()
+                managed.update(protect_username=old['username'], protect_password=old['password'])
+                connection.save_managed(managed)
+        except (ValueError, OSError):
+            # Keep the working legacy login; never put account details in this log.
+            print('Protect account transfer pending; existing login preserved.',flush=True)
             return {**options,'protect_username':old['username'],'protect_password':old['password']}
-        except Exception:
-            # Keep the working account rather than require a new login when the
-            # Supervisor is not ready. Never put account details in this log.
-            print('Protect account configuration transfer pending; existing login preserved.',flush=True)
-            return {**options,'protect_username':old['username'],'protect_password':old['password']}
+        self._save_connection_trust(old)
+        return {**options,'protect_username':old['username'],'protect_password':old['password']}
+
+    def verify_account(self, host, username, password, *, refresh_certificate=False):
+        """Sign in once over a pinned connection and return console details.
+
+        Read-only: lists chimes but never adopts, removes, renames or plays.
+        On success the console certificate used for management is remembered.
+        """
+        host = lan_ip(host)
+        if not all(isinstance(v, str) and 0 < len(v) <= limit
+                for v, limit in ((username, 128), (password, 4096))):
+            raise ManagementError('Enter your local UniFi username and password.')
+        fingerprint = None if refresh_certificate else self._saved_fingerprint(host)
+        if fingerprint is None:
+            pem, fingerprint = self.fetcher(host)
+            actual = hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest()
+            if not hmac.compare_digest(actual, fingerprint):
+                raise ManagementError('The console certificate could not be checked.')
+        account = {'host': host, 'username': username, 'password': password, 'fingerprint': fingerprint}
+        async def check():
+            async with self.client_factory(account) as client:
+                await client.chimes()
+                return await client.console_info() if hasattr(client, 'console_info') else {}
+        info = self._run(check())
+        with self.lock:
+            self.revision += 1
+            self._chime_count_cache = None
+        self._save_connection_trust(account)
+        return info if isinstance(info, dict) else {}
 
     def configure(self, options):
         """Read canonical HA options without logging in or duplicating passwords."""
@@ -227,22 +267,8 @@ class ProtectManagement:
         with self.lock:
             account = dict(self.configured_account or {})
         if not account or account['host'] != host:
-            raise ManagementError('Enter the local Protect username and password in this Home Assistant app’s Configuration tab.')
-        trust = self.path.with_name('protect-management-trust.json')
-        fingerprint = None
-        if trust.exists():
-            if trust.is_symlink() or trust.stat().st_mode & 0o077:
-                raise ManagementError('Protect connection storage must be private.')
-            saved = json.loads(trust.read_text())
-            if not isinstance(saved,dict):
-                raise ManagementError('The saved Protect connection is invalid.')
-            if saved.get('host') == host:
-                fingerprint = saved.get('fingerprint')
-        elif self.path.exists():
-            # Reuse a previously confirmed pin, but never its old saved password.
-            saved = self._read()
-            if saved['host'] == host:
-                fingerprint = saved['fingerprint']
+            raise ManagementError('Add a local Protect account in this app: choose Change next to the console address at the top.')
+        fingerprint = self._saved_fingerprint(host)
         if fingerprint is None:
             # Same first-use local-console trust model as HA's local integration;
             # pin every credential-bearing connection to this observed certificate.
@@ -254,6 +280,23 @@ class ProtectManagement:
             raise ManagementError('The saved Protect connection is invalid.')
         return {**account,'fingerprint':fingerprint}
 
+    def _saved_fingerprint(self, host):
+        """The remembered management certificate pin for this console, if any."""
+        trust = self.path.with_name('protect-management-trust.json')
+        if trust.exists():
+            if trust.is_symlink() or trust.stat().st_mode & 0o077:
+                raise ManagementError('Protect connection storage must be private.')
+            saved = json.loads(trust.read_text())
+            if not isinstance(saved,dict):
+                raise ManagementError('The saved Protect connection is invalid.')
+            return saved.get('fingerprint') if saved.get('host') == host else None
+        if self.path.exists():
+            # Reuse a previously confirmed pin, but never its old saved password.
+            saved = self._read()
+            if saved['host'] == host:
+                return saved['fingerprint']
+        return None
+
     def _save_connection_trust(self, account, *, clear_legacy=True):
         trust = self.path.with_name('protect-management-trust.json')
         trust.parent.mkdir(parents=True,exist_ok=True)
@@ -264,7 +307,7 @@ class ProtectManagement:
                 json.dump({'host':account['host'],'fingerprint':account['fingerprint']},output)
                 output.flush();os.fsync(output.fileno())
             os.replace(temporary,trust)
-            # HA options are now the only persistent credential source.
+            # The app's private settings are now the only persistent credential source.
             if clear_legacy:
                 self.path.unlink(missing_ok=True)
         finally:
@@ -275,7 +318,7 @@ class ProtectManagement:
             with self.lock:
                 account = self.configured_account
                 return {'configured':bool(account),'ready':bool(account and account['host']==host),
-                        'configuration_source':'home_assistant'}
+                        'configuration_source':'app'}
         try:
             with self.lock:
                 account = self._read()

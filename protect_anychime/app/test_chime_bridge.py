@@ -172,7 +172,8 @@ class StartupDiagnosticTests(unittest.IsolatedAsyncioTestCase):
                 await worker._run(Path(directory))
             network.assert_not_called()
             self.assertIn('no saved console certificate',output.getvalue())
-            self.assertIn('refresh the console certificate',worker.error)
+            self.assertIn('Connect to your Protect console',worker.error)
+            self.assertTrue(worker.waiting_for_setup)
     def test_startup_diagnostic_does_not_read_or_print_private_identity_contents(self):
         import contextlib
         with tempfile.TemporaryDirectory() as directory:

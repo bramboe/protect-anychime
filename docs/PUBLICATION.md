@@ -2,9 +2,9 @@
 
 ## Each installation owns its trust
 
-There is no shared Protect certificate. At setup, the user selects/confirms their own console. The app reads the public certificate without sending login credentials, then stores confirmed trust in private Home Assistant app data. Native chime TLS verifies that installation's certificate and SHA-256 pin before connecting. Management HTTPS maintains its own pin for the console's management endpoint; different console ports need not use the same certificate.
+There is no shared Protect certificate. At setup, the user connects their own console from the app's web interface. The app reads the public certificate; when the user also enters a local account, it signs in once over a connection pinned to the observed management certificate before saving anything. Confirmed trust and the account are stored in private Home Assistant app data. Native chime TLS verifies that installation's certificate and SHA-256 pin before connecting. Management HTTPS maintains its own pin for the console's management endpoint; different console ports need not use the same certificate.
 
-The first confirmation associates the observed console with the user's chosen address; it is not independent proof of the console's identity. Replacing a confirmed certificate requires confirmation again. A legacy installation that saved only a pin can recover the public certificate only if it exactly matches that existing pin. Missing trust is never replaced with a developer certificate or a global disable-verification setting.
+The first connection associates the observed console with the user's chosen address; it is not independent proof of the console's identity. A successful sign-in and the console name shown afterwards help the user recognise their own console. Replacing a confirmed certificate requires confirmation again. A legacy installation that saved only a pin can recover the public certificate only if it exactly matches that existing pin. Missing trust is never replaced with a developer certificate or a global disable-verification setting.
 
 Virtual-device certificates and keys are generated separately on each installation and remain in HA app data. Existing adopted identities are preserved during upgrades. HA backups contain private installation state and must not be added to the source repository.
 

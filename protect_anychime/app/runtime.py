@@ -93,6 +93,8 @@ class NativeWorker:
     def start(self, options, data_dir='/data/native'):
         if self.thread:
             return
+        self._data_dir=data_dir
+        self.waiting_for_setup=False
         self.options=dict(options)
         self.registry=ChimeRegistry(Path(data_dir).parent)
         if not any(e.get('entity_id') for e in self.registry.snapshot()) and options.get('speaker_entities'):
@@ -105,6 +107,28 @@ class NativeWorker:
         self.thread=threading.Thread(target=lambda:asyncio.run(self._run(Path(data_dir).parent)),
                                      daemon=True,name='native-chimes')
         self.thread.start()
+
+    def resume_after_setup(self, options):
+        """Start a bridge that stopped only because the console was not set up yet.
+
+        A running bridge is never restarted here; switching consoles still needs an
+        app restart so active chimes are torn down cleanly.
+        """
+        with self.lock:
+            thread=self.thread
+            if not getattr(self,'waiting_for_setup',False) or thread is None or thread.is_alive():
+                return False
+            self.thread=None
+            self.error=None
+            self.waiting_for_setup=False
+            self.stop_event=threading.Event()
+        self.start(options,getattr(self,'_data_dir','/data/native'))
+        return True
+
+    def set_auto_adopt(self, enabled):
+        """Apply the automatic-adoption choice immediately."""
+        with self.lock:
+            self.options['auto_adopt_chimes']=enabled is True
 
     def refresh_groups(self, rows):
         if self.registry is None:
@@ -342,11 +366,13 @@ class NativeWorker:
         self.loop = asyncio.get_running_loop()
         try:
             if not self.options.get('native_ip') or not self.options.get('controller_ip'):
-                self.error='Open Connection to check your console address.'
-                print('Bridge waiting: '+self.error,flush=True)
+                self.error='Connect to your Protect console at the top of this page.'
+                self.waiting_for_setup=True
+                print('Bridge waiting: no console address yet.',flush=True)
                 return
             if not self.options.get('controller_fingerprint'):
-                self.error='Open Connection, refresh the console certificate and confirm it before adoption.'
+                self.error='Connect to your Protect console at the top of this page.'
+                self.waiting_for_setup=True
                 print('Bridge waiting: no saved console certificate. Existing device identities remain unchanged.',flush=True)
                 return
             self.options=await asyncio.to_thread(connection.ensure_saved_certificate,self.options)

@@ -14,6 +14,17 @@ MAX_TOTAL=256*1024*1024
 ROOT_FILES={'managed-settings.json','speakers.json','chimes.json','product-links.json','latency-delays.json','chime-schema.json','protect-management-trust.json'}
 DIRECTORIES={'native','identities','ringtones','network'}
 SETTINGS={'native_ip','controller_ip','controller_fingerprint','controller_certificate','unifi_compatibility_profile'}
+# The Protect account is never exported; an import keeps the one already set up here.
+ACCOUNT_SETTINGS={'protect_username','protect_password','auto_adopt_chimes','console_name','console_model','console_version','imported_account_digest'}
+
+
+def _keep_account(target,data):
+    try:
+        current=json.loads(target.read_text()) if target.is_file() else {}
+    except (ValueError,OSError):
+        current={}
+    kept={k:v for k,v in current.items() if k in ACCOUNT_SETTINGS} if isinstance(current,dict) else {}
+    return json.dumps({**json.loads(data),**kept}).encode() if kept else data
 
 
 def allowed(name):
@@ -130,6 +141,8 @@ def import_state(raw, directory):
     committed=[]
     try:
         for name,data in files.items():
+            if name=='managed-settings.json':
+                data=_keep_account(root/name,data)
             path=staging/name
             path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
             fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)

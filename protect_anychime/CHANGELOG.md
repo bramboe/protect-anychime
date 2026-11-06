@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- Set up the Protect connection in one step at the top of the web interface: console address (detected automatically), local account and automatic adoption, then **Connect**. The rest of the page is unavailable until the console is connected.
+- Sign in once to check the account and show the console's name, model and Protect version. Nothing is saved when the sign-in fails.
+- Apply a new connection without restarting the app. Only switching a running bridge to a different console still asks for a restart.
+- Store the account in private app data instead of the Home Assistant Configuration tab. Values still entered there are moved into the app on the next start and the fields are cleared. **Continue without an account** connects only the console; **Change** next to the console address edits or removes the account.
+- Automatic adoption is on by default when you add an account.
+
 ## 0.4.12
 
 - Attach the chime menu to its ⋯ button so it scrolls with the page instead of staying in place over other chimes. It opens below the button, or above it when there is not enough room. Outside clicks, Escape and slider drags behave as before; removal confirmations still appear centred over Home Assistant.

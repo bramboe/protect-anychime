@@ -13,6 +13,7 @@ import configuration
 import migration
 import connection
 import management
+import setup_flow
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
@@ -24,7 +25,7 @@ from manual_timing import ManualTiming
 
 ROOT = Path(__file__).resolve().parent
 NATIVE = NativeWorker()
-VERSION = "0.4.12"
+VERSION = "0.5.0"
 DEFAULT_PORT = 48200
 SELECTION_LOCK = NATIVE.selection_lock
 DATA_ROOT = Path(os.environ.get("ANYCHIME_DATA_DIR", "/data"))
@@ -37,7 +38,8 @@ MANAGEMENT = management.ProtectManagement(DATA_ROOT / "protect-management.json")
 def load_options():
     path = Path(os.environ.get("OPTIONS_PATH", "/data/options.json"))
     options = json.loads(path.read_text()) if path.exists() else {}
-    options = configuration.normalize(options)
+    # The Protect account comes from the app's own settings, not HA options.
+    options = setup_flow.without_account(configuration.normalize(options))
     options = connection.runtime_options(options)
     MANAGEMENT.configure(options)
     options["speaker_entities"] = (NATIVE.registry.selected_entities()
@@ -232,12 +234,14 @@ class Handler(BaseHTTPRequestHandler):
             except (SpeakerError, ValueError, OSError):
                 return self.respond(503, {"error": "Could not load speakers from Home Assistant."})
         if route == "/api/connection":
-            return self.respond(200, connection.public_status(load_options()))
+            options = load_options()
+            return self.respond(200, {**connection.public_status(options), "setup": setup_flow.public_setup(options)})
         if route == "/api/status":
             options = load_options()
-            return self.respond(200, {"version": VERSION, "build": "lifecycle1",
+            return self.respond(200, {"version": VERSION, "build": "setup1",
                 "mode": "protect_controlled", "native": NATIVE.status(),
                 "connection": connection.public_status(options),
+                "setup": setup_flow.public_setup(options),
                 "management": MANAGEMENT.status(options.get('controller_ip','')),
                 "migration": {"can_import": not (DATA_ROOT / "native").exists() and not (DATA_ROOT / "identities").exists()}})
         self.respond(404, {"error": "Not found"})
@@ -278,7 +282,7 @@ class Handler(BaseHTTPRequestHandler):
             except (SpeakerError,ValueError,OSError) as error:
                 return self.respond(400,{'error':str(error) if isinstance(error,ValueError) else 'Could not save product information.'})
         if route in ("/api/management/prepare", "/api/management/login", "/api/management/forget"):
-            return self.respond(403, {"error": "Manage Protect credentials in this app's Home Assistant Configuration tab."})
+            return self.respond(403, {"error": "Manage the Protect account with Change next to the console address in this app."})
         if route in ("/api/chimes/remove", "/api/chimes/inspect", "/api/chimes/prepare-adoption", "/api/chimes/test"):
             if self.client_address[0] != "172.30.32.2":
                 return self.respond(403, {"error": "Authenticated Home Assistant ingress required"})
@@ -312,7 +316,7 @@ class Handler(BaseHTTPRequestHandler):
                     operation='test chime' if route.endswith('/test') else 'prepare adoption' if route.endswith('/prepare-adoption') else 'remove chime' if route.endswith('/remove') else 'inspect chimes'
                     print('Protect management failed: '+operation+' ('+error.kind+(', HTTP '+str(error.http_status) if error.http_status else '')+'). No request data or credentials logged.',flush=True)
                     if error.kind=='rate_limit':message='Protect is temporarily limiting requests (HTTP 429). Wait a minute, then try again. No automatic test retry was sent.'
-                    elif error.kind=='authentication':message='Protect refused access. Check the local account permissions in the HA app Configuration. Check app logs.'
+                    elif error.kind=='authentication':message='Protect refused access. Check the local account permissions with Change next to the console address. Check app logs.'
                     elif error.http_status is not None:
                         message='Protect could not complete this request (HTTP '+str(error.http_status)+'). Check app logs. Tests are not retried automatically because playback may already have started.'
                     else:message=str(error)
@@ -352,6 +356,31 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(400, {"error": str(error)})
             except OSError:
                 return self.respond(500, {"error": "The migration data could not be read or saved."})
+        if route == "/api/connection/connect":
+            if self.client_address[0] != "172.30.32.2":
+                return self.respond(403, {"error": "Authenticated Home Assistant ingress required"})
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 8192:
+                    raise ValueError("Invalid connection request.")
+                payload = json.loads(self.rfile.read(length))
+                result = setup_flow.connect(payload, load_options(), certificates=CERTIFICATES, management=MANAGEMENT)
+                result['bridge'] = setup_flow.apply(NATIVE, load_options(), result)
+                print('Protect connection saved'+(' with a local account' if result['account_configured'] else ' without an account')
+                      +'; bridge '+result['bridge']+'. No credentials logged.', flush=True)
+                return self.respond(200, result)
+            except management.ManagementError as error:
+                print('Protect connection failed ('+error.kind+(', HTTP '+str(error.http_status) if error.http_status else '')+'). No credentials logged.', flush=True)
+                message = {'authentication': 'The console refused this username or password. Use a local UniFi account with Protect access, not a UI.com account.',
+                           'rate_limit': 'The console is limiting sign-in attempts. Wait a minute, then try again.',
+                           'timeout': 'The console did not answer in time. Check the address and try again.',
+                           'network': 'Could not reach the console at this address.',
+                           'certificate': 'The console certificate changed while connecting. Try again.'}.get(error.kind, str(error))
+                return self.respond(400, {"error": message, "kind": error.kind})
+            except ValueError as error:
+                return self.respond(400, {"error": str(error)})
+            except (OSError, SpeakerError):
+                return self.respond(503, {"error": "Could not reach the console at this address. Check it and try again."})
         if route in ("/api/connection/certificate", "/api/connection/trust"):
             if self.client_address[0] != "172.30.32.2":
                 return self.respond(403, {"error": "Authenticated Home Assistant ingress required"})
@@ -453,19 +482,26 @@ def run_server():
     server = ThreadingHTTPServer((address, port), Handler)
     previous_handlers=install_shutdown_handlers(server)
     try:
+        raw_path = Path(os.environ.get("OPTIONS_PATH", "/data/options.json"))
+        try:
+            raw_options = json.loads(raw_path.read_text()) if raw_path.exists() else {}
+        except (ValueError, OSError):
+            raw_options = {}
+        try:
+            setup_flow.import_home_assistant_account(raw_options, configuration.self_options)
+        except (ValueError, OSError):
+            print("Protect account import pending; connect again in the web interface if needed.", flush=True)
         options = load_options()
         try:
-            raw_path = Path(os.environ.get("OPTIONS_PATH", "/data/options.json"))
-            raw_options = json.loads(raw_path.read_text()) if raw_path.exists() else {}
             migrated = configuration.migrate(raw_options, effective=options)
             if migrated is not None:
                 options["speaker_entities"] = speakers.selected(options)
         except (SpeakerError, ValueError, OSError):
             print("Configuration migration pending; existing settings remain in use.", flush=True)
-        options = MANAGEMENT.migrate_to_configuration(options, configuration.self_options)
+        options = MANAGEMENT.migrate_legacy_account(options)
         MANAGEMENT.configure(options)
         NATIVE.start(options)
-        print(f"Protect AnyChime {VERSION} (lifecycle1): web interface on {port}; playback controlled by Protect.", flush=True)
+        print(f"Protect AnyChime {VERSION} (setup1): web interface on {port}; playback controlled by Protect.", flush=True)
         server.serve_forever()
     finally:
         try:

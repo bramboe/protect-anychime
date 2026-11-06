@@ -272,28 +272,63 @@ class HAConfigurationAccountTests(unittest.TestCase):
         self.assertEqual(set(trust),{'host','fingerprint'});self.assertFalse(self.path.exists())
         self.assertEqual(self.client.calls[0][1]['username'],'config-user')
 
-    def test_existing_working_account_moves_to_own_ha_options_without_login(self):
-        self.connect();self.client.calls.clear();stored={'protect_username':'','protect_password':''};calls=[]
-        def request(method,body=None):
-            calls.append((method,body))
-            if method=='POST':stored.update(body['options']);return {}
-            return {'options':stored.copy()}
-        result=self.manager.migrate_to_configuration({'controller_ip':HOST},request)
-        self.assertEqual(result['protect_username'],'local-user')
-        self.assertEqual(stored['protect_password'],'private-test-password')
-        self.assertFalse(self.path.exists());self.assertEqual(self.client.calls,[])
-        self.assertEqual([c[0] for c in calls],['GET','POST','GET'])
+    def managed_path(self):
+        import connection
+        return patch.object(connection,'MANAGED_PATH',Path(self.temp.name)/'managed-settings.json')
 
-    def test_configuration_migration_failure_preserves_working_login(self):
+    def test_existing_working_account_moves_to_private_app_settings_without_login(self):
         self.connect();self.client.calls.clear()
-        result=self.manager.migrate_to_configuration({'controller_ip':HOST},Mock(side_effect=OSError('unavailable')))
+        with self.managed_path():
+            import connection
+            result=self.manager.migrate_legacy_account({'controller_ip':HOST})
+            saved=connection.read_managed()
+        self.assertEqual(result['protect_username'],'local-user')
+        self.assertEqual(saved['protect_password'],'private-test-password')
+        self.assertEqual((Path(self.temp.name)/'managed-settings.json').stat().st_mode&0o077,0)
+        self.assertFalse(self.path.exists());self.assertEqual(self.client.calls,[])
+        trust=json.loads(self.path.with_name('protect-management-trust.json').read_text())
+        self.assertEqual(set(trust),{'host','fingerprint'})
+
+    def test_legacy_migration_failure_preserves_working_login(self):
+        self.connect();self.client.calls.clear()
+        with self.managed_path(),patch('connection.save_managed',side_effect=OSError('read-only')):
+            result=self.manager.migrate_legacy_account({'controller_ip':HOST})
         self.assertTrue(self.path.exists());self.assertEqual(result['protect_username'],'local-user')
         self.assertEqual(self.client.calls,[])
 
-    def test_user_configured_account_is_never_overwritten_by_legacy_login(self):
-        self.connect();request=Mock(return_value={'options':{'protect_username':'new-user','protect_password':'new-password'}})
-        result=self.manager.migrate_to_configuration({'controller_ip':HOST},request)
-        self.assertEqual(result['protect_username'],'new-user');request.assert_called_once_with('GET')
+    def test_app_account_is_never_overwritten_by_legacy_login(self):
+        self.connect()
+        with self.managed_path():
+            import connection
+            result=self.manager.migrate_legacy_account({'controller_ip':HOST,'protect_username':'new-user','protect_password':'new-password'})
+            self.assertEqual(connection.read_managed(),{})
+        self.assertEqual(result['protect_username'],'new-user');self.assertFalse(self.path.exists())
+
+    def test_verify_account_signs_in_read_only_and_remembers_only_the_pin(self):
+        info=self.manager.verify_account(HOST,'local-user','private-test-password')
+        self.assertEqual(info,{});self.fetcher.assert_called_once_with(HOST)
+        self.assertEqual([c[0] for c in self.client.calls],['account','list'])
+        trust=self.path.with_name('protect-management-trust.json')
+        self.assertEqual(json.loads(trust.read_text()),{'host':HOST,'fingerprint':PIN})
+        self.assertNotIn('private-test-password',trust.read_text())
+        # A second check reuses the pin; a re-confirmed console fetches it again.
+        self.manager.verify_account(HOST,'local-user','private-test-password')
+        self.assertEqual(self.fetcher.call_count,1)
+        self.manager.verify_account(HOST,'local-user','private-test-password',refresh_certificate=True)
+        self.assertEqual(self.fetcher.call_count,2)
+
+    def test_verify_account_failure_saves_nothing(self):
+        self.client.failure=management.ManagementError('refused',kind='authentication',http_status=401)
+        with self.assertRaises(management.ManagementError):
+            self.manager.verify_account(HOST,'local-user','wrong')
+        self.assertFalse(self.path.with_name('protect-management-trust.json').exists())
+
+    def test_console_info_is_bounded_and_failure_tolerant(self):
+        session=management.ProtectSession({'host':HOST,'username':'u','password':'p','fingerprint':PIN})
+        session.request=AsyncMock(return_value={'name':'Dream Machine Pro','marketName':'UDM Pro','version':'6.1.2','mac':'AABBCCDDEEFF'})
+        self.assertEqual(asyncio.run(session.console_info()),{'console_name':'Dream Machine Pro','console_model':'UDM Pro','console_version':'6.1.2'})
+        session.request=AsyncMock(side_effect=management.ManagementError('denied',kind='authentication'))
+        self.assertEqual(asyncio.run(session.console_info()),{})
 
 class PreviousChimeDiscoveryTests(unittest.TestCase):
     setUp=ManagementTests.setUp
@@ -467,11 +502,12 @@ class AutomaticAdoptionTests(unittest.TestCase):
     def test_adopted_or_currently_adopting_chime_is_not_adopted_again(self):
         self.setup_candidate();self.client.devices[0]['isAdopted']=True
         self.manager.auto_adopt(HOST,'primary',self.worker);self.client.adopt.assert_not_called()
-    def test_manifest_default_remains_disabled_and_explains_setup(self):
+    def test_setup_explains_what_automatic_adoption_does_not_configure(self):
         root=Path(__file__).parents[1];config=json.loads((root/'config.json').read_text())
-        self.assertIs(config['options']['auto_adopt_chimes'],False)
-        text=json.loads((root/'translations/en.json').read_text())['configuration']['auto_adopt_chimes']['description']
-        for value in ['doorbell','ringtone','volume','repeats']:self.assertIn(value,text)
+        self.assertNotIn('auto_adopt_chimes',config['options'])
+        page=(root/'app/index.html').read_text()
+        hint=page[page.index('id="auto-adopt"'):page.index('id="connect-protect"')]
+        for value in ['doorbell','ringtone','volume','repeats']:self.assertIn(value,hint)
 
 
 class ChimeCountTests(unittest.TestCase):

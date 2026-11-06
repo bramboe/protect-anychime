@@ -57,6 +57,6 @@ class ArtworkTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         config = json.loads((root/'config.json').read_text())
         self.assertEqual(config['slug'],'protect_anychime')
-        self.assertEqual(config['schema'],{'protect_username':'str','protect_password':'password','auto_adopt_chimes':'bool'})
+        self.assertEqual(config['schema'],{'protect_username':'str?','protect_password':'password?','auto_adopt_chimes':'bool?'})
         labels = json.loads((root/'translations/en.json').read_text())['configuration']
         self.assertEqual(set(labels), set(config['schema']))

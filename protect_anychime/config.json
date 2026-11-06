@@ -1,6 +1,6 @@
 {
   "name": "Protect AnyChime",
-  "version": "0.4.12",
+  "version": "0.5.0",
   "slug": "protect_anychime",
   "description": "Turn a Home Assistant speaker or speaker group into a UniFi Protect chime.",
   "arch": [
@@ -17,15 +17,11 @@
   "host_network": true,
   "homeassistant_api": true,
   "hassio_api": false,
-  "options": {
-    "protect_username": "",
-    "protect_password": "",
-    "auto_adopt_chimes": false
-  },
+  "options": {},
   "schema": {
-    "protect_username": "str",
-    "protect_password": "password",
-    "auto_adopt_chimes": "bool"
+    "protect_username": "str?",
+    "protect_password": "password?",
+    "auto_adopt_chimes": "bool?"
   },
   "privileged": [
     "NET_ADMIN",

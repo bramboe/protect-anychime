@@ -2,7 +2,7 @@
 
 ## Chimes and speakers
 
-Configure the app's verified Protect console connection in the web interface. Configure the local Protect management username/password in Home Assistant's app Configuration tab. Console certificates and accounts are installation-specific; credentials never belong in the source tree. The existing adoption, automatic-adoption option, native chime protocol, management ownership checks and ringtone upload/storage remain in use.
+Connect the Protect console and, optionally, a local Protect management account in one step at the top of the web interface. The rest of the page stays unavailable until the console is connected. Connecting reads the console certificate, signs in once over a connection pinned to the console's management certificate (read-only: it lists chimes), then saves the native and management pins, the account and the automatic-adoption choice in private app data (`managed-settings.json`, mode 0600). Changes apply without restarting the app; switching a running bridge to a different console still asks for one restart. The password is never returned by the API or logged. The account fields in Home Assistant's app Configuration tab are no longer used: values still entered there are moved into the app on the next start and the fields are cleared. Console certificates and accounts are installation-specific; credentials never belong in the source tree. The existing adoption, automatic-adoption option, native chime protocol, management ownership checks and ringtone upload/storage remain in use.
 
 Available speakers are individual eligible `media_player` entities. HA group entities remain individual choices; AnyChime does not inspect `group_members` to decide chime membership. Discovery refreshes names, availability, platform and device metadata without changing fixed sets. Native UniFi devices, known incompatible routes and entities without PLAY_MEDIA capability are hidden. Missing previously selected entities remain visible as offline members.
 
@@ -54,12 +54,12 @@ Home Assistant identifies an app by its internal slug, not its visible name. Ver
 
 1. Make a Home Assistant backup of the existing app. Keep it private: saved identities, keys, accounts and recordings belong to your installation.
 2. In the existing app's interface, use **Move an existing installation → Pause bridge & export backup**. This pauses its native bridge. Stop the old app in HA before starting the renamed one.
-3. Install the renamed app. Copy the local Protect account settings from the old app's HA Configuration tab if you use management or automatic adoption. Do not add speakers or establish new identities yet.
+3. Install the renamed app. Do not connect it, add speakers or establish new identities yet.
 4. Start the new app, open its web interface and import the exported backup into this fresh installation. Restart the new app after importing.
 5. Confirm that the original chimes and speaker sets return and connect to Protect. The backup preserves native device identities, controller trust, received ringtones and manual timing. Earlier exports may require the management connection to be verified again; newer exports also include its saved certificate trust.
 6. Keep the old app stopped until verification is complete. You can then uninstall the old installation. Never run both copies of the same chime identities together.
 
-Switching between a local app and a GitHub repository app can also change HA's app ID prefix. Use the same transfer process. Export/import does not copy Supervisor account options: configure the local Protect username/password and automatic-adoption preference in the new app's HA Configuration tab.
+Switching between a local app and a GitHub repository app can also change HA's app ID prefix. Use the same transfer process. Export/import never copies the Protect account: after importing, add it with **Change** next to the console address at the top of the new app's web interface.
 
 ## Compact chime cards and action feedback
 
@@ -71,7 +71,7 @@ Remove and × work during preparation, adoption, offline conditions and manageme
 
 Actions show immediate progress, prevent duplicate submissions, and report completion or an orange error in a viewport-visible message. Membership errors are also shown on the affected card. Dialogs use in-app confirmation, with an explicit Cancel, rather than browser confirmation prompts. Refreshing speakers, checking/saving a console connection, timing requests, product-information saves and explicit test requests show progress. Tests remain opt-in at the requested volume; no opening, rendering, collapsing or saving operation starts audio.
 
-Console certificate confirmation authorizes the native chime connection; the local Protect account in HA app Configuration authorizes management operations. Both are required for automatic adoption. Temporary rate limits, network failures and server errors retry with backoff without consuming the three adoption attempts. A rate limit pauses adoption across all chimes and defers configuration polling during the cooldown.
+The confirmed console certificate authorizes the native chime connection; the local Protect account entered in the web interface authorizes management operations. Both are required for automatic adoption. Temporary rate limits, network failures and server errors retry with backoff without consuming the three adoption attempts. A rate limit pauses adoption across all chimes and defers configuration polling during the cooldown.
 
 Explicit management actions log their operation, failure category and HTTP status without account details or request bodies. An upstream test failure does not necessarily mean playback was not started; sound tests are never automatically retried. The chime menu is a non-modal panel inside the app page, so the underlying page stays usable and scrollable. Removal confirmations are shown centred over Home Assistant.
 
