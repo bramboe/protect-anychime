@@ -1,6 +1,6 @@
 # Protect AnyChime
 
-[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/bramboe?frequency=one-time) [![Donate via bunq.me](https://img.shields.io/badge/Donate-bunq.me-2E9AD0)](https://bunq.me/bramboe)
+[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/bramboe?frequency=one-time) [![Sponsor bunq.me](https://img.shields.io/badge/Sponsor-bunq.me-2E9AD0)](https://bunq.me/bramboe)
 
 Any speaker can be a chime. Home Assistant app for forwarding UniFi Protect chime requests to Home Assistant media players. Independent project; not an official Home Assistant or Ubiquiti product.
 
