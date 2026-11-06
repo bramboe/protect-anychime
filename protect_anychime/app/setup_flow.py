@@ -4,7 +4,7 @@ Connect confirms the console certificate and, optionally, verifies a local Prote
 account. The account is stored in this app's private settings (not in the Home
 Assistant Configuration tab) and takes effect without restarting the app. An
 account still typed into the Configuration tab is imported once and then cleared,
-so there is a single place to manage it.
+so there is a single place to manage it. The app declares no HA options any more.
 """
 import hashlib
 import json
@@ -37,14 +37,23 @@ def public_setup(options):
 
 
 def import_home_assistant_account(raw_options, requester):
-    """Move an account typed into the HA Configuration tab into the app, once.
+    """Move an account saved in HA app options by an older version into the app, once.
 
-    A digest of the imported values prevents a later restart from overwriting an
-    account changed in the app when the HA fields could not be cleared.
+    The app no longer declares these options, so Supervisor leaves them out of
+    options.json; they are read from the stored options through the Supervisor
+    API instead, then removed there. A digest of the imported values prevents a
+    later restart from overwriting an account changed in the app when the stored
+    options could not be cleared.
     """
-    if not isinstance(raw_options, dict) or not any(key in raw_options for key in ACCOUNT_KEYS):
+    try:
+        current = requester('GET').get('options')
+        current = current if isinstance(current, dict) else None
+    except Exception:
+        current = None
+    source = {**(current or {}), **(raw_options if isinstance(raw_options, dict) else {})}
+    if not any(key in source for key in ACCOUNT_KEYS):
         return False
-    username, password = raw_options.get('protect_username'), raw_options.get('protect_password')
+    username, password = source.get('protect_username'), source.get('protect_password')
     imported = False
     if _text(username, 128) and _text(password, 4096):
         digest = hashlib.sha256(json.dumps([username, password]).encode()).hexdigest()
@@ -54,17 +63,16 @@ def import_home_assistant_account(raw_options, requester):
                 for key in CONSOLE_KEYS:
                     managed.pop(key, None)
                 managed.update(protect_username=username, protect_password=password,
-                               auto_adopt_chimes=raw_options.get('auto_adopt_chimes') is True)
+                               auto_adopt_chimes=source.get('auto_adopt_chimes') is True)
                 managed[IMPORT_DIGEST] = digest
                 connection.save_managed(managed)
                 imported = True
-    try:
-        current = requester('GET').get('options')
-        if isinstance(current, dict) and any(key in current for key in ACCOUNT_KEYS):
+    if current is not None and any(key in current for key in ACCOUNT_KEYS):
+        try:
             requester('POST', {'options': without_account(current)})
-    except Exception:
-        # Never log account details. The import above already took effect.
-        print('Home Assistant app options could not be cleared yet; the Protect account is managed in the app.', flush=True)
+        except Exception:
+            # Never log account details. The import above already took effect.
+            print('Home Assistant app options could not be cleared yet; the Protect account is managed in the app.', flush=True)
     if imported:
         print('Protect account moved from the Home Assistant Configuration tab into the app.', flush=True)
     return imported

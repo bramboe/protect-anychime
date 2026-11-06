@@ -125,8 +125,8 @@ class ConnectionTests(unittest.TestCase):
     def test_settings_schema_only_contains_daily_playback_controls(self):
         root = Path(__file__).resolve().parents[1]
         config = json.loads((root/'config.json').read_text())
-        # Only legacy, optional import fields remain; the account is set up in the web interface.
-        self.assertEqual(config['schema'], {'protect_username':'str?','protect_password':'password?','auto_adopt_chimes':'bool?'})
+        # No HA options remain; the account is set up in the web interface.
+        self.assertEqual(config['schema'], {})
         self.assertEqual(config['options'], {})
 
     def test_imported_certificate_keeps_native_pin_check_in_force(self):

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.7
+
+- Remove the moved Protect account options from the Home Assistant Configuration tab; the app now has no HA options. An account saved there by an older version is still moved into the app on the first start, read from Supervisor's stored options, and then removed there.
+
 ## 0.5.6
 
 - Show a small status light before each chime's name, so collapsed chimes still show their state: green when active or connected, orange when something needs attention (offline, adopt or configure in Protect, removal not confirmed), blue while busy (preparing, adopting, checking). Hover shows the status; screen readers hear it with the name.

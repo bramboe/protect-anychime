@@ -130,6 +130,25 @@ class SetupFlowTests(unittest.TestCase):
         self.assertEqual(stored, {'unrelated': 1})
         self.assertEqual(calls, ['GET', 'POST'])
 
+    def test_account_only_in_stored_supervisor_options_is_still_imported(self):
+        # Without a schema, Supervisor leaves the old keys out of options.json.
+        stored = {'protect_username': 'old-user', 'protect_password': 'old-password', 'auto_adopt_chimes': False}
+        def request(method, body=None):
+            if method == 'POST':
+                stored.clear(); stored.update(body['options']); return {}
+            return {'options': dict(stored)}
+        self.assertTrue(setup_flow.import_home_assistant_account({}, request))
+        saved = connection.read_managed()
+        self.assertEqual((saved['protect_username'], saved['protect_password']), ('old-user', 'old-password'))
+        self.assertIs(saved['auto_adopt_chimes'], False)
+        self.assertEqual(stored, {})
+
+    def test_fresh_install_without_old_options_changes_nothing(self):
+        request = Mock(return_value={'options': {}})
+        self.assertFalse(setup_flow.import_home_assistant_account({}, request))
+        request.assert_called_once_with('GET')
+        self.assertFalse(self.managed.exists())
+
     def test_unclearable_home_assistant_values_never_overwrite_a_newer_app_account(self):
         raw = {'protect_username': 'ha-user', 'protect_password': 'ha-password'}
         failing = Mock(side_effect=OSError('supervisor unavailable'))
