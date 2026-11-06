@@ -36,7 +36,12 @@ function render(){
   const title=document.createElement('h3'),toggle=document.createElement('button');toggle.type='button';toggle.className='chime-toggle';
   toggle.setAttribute('aria-expanded',String(expandedChimes.has(chime.key)));toggle.setAttribute('aria-controls','chime-content-'+chime.key);
   toggle.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>';
-  const titleText=document.createElement('span');titleText.textContent=chime.name;toggle.append(titleText);title.append(toggle);
+  const titleText=document.createElement('span');titleText.textContent=chime.name;
+  // A small status light keeps the state visible while the card is collapsed.
+  const headingStatus=AnyChimeStatus(chime,nativeStates.get(chime.key),{autoAdoptEnabled,managementReady});
+  const dot=document.createElement('span');dot.className='chime-dot '+headingStatus.tone;dot.title=headingStatus.label;dot.setAttribute('aria-hidden','true');
+  const spoken=document.createElement('span');spoken.className='sr-only';spoken.textContent=', '+headingStatus.label;
+  toggle.append(dot,titleText,spoken);title.append(toggle);
   const options=document.createElement('button');options.type='button';options.className='speaker-action chime-options';options.disabled=mutationBusy;
   options.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/></svg>';
   options.dataset.chimeKey=chime.key;options.setAttribute('aria-label','Actions for '+chime.name);options.onclick=e=>{e.stopPropagation();openChimeActions(chime,options);};header.append(title,options);

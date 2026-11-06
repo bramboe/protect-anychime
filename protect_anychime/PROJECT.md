@@ -1,6 +1,6 @@
 # Protect AnyChime project
 
-Source app version: 0.5.5. Slug: `protect_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
+Source app version: 0.5.6. Slug: `protect_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
 
 ## Chimes and speakers
 
@@ -46,7 +46,7 @@ Pairing is read from Protect for verified installation-owned identities approxim
 
 ## Compact chime cards and action feedback
 
-Chime cards start collapsed on every page load, return visit and restored page. Only the title, expansion arrow and actions menu remain visible. Expand/collapse choices stay in memory through background status polls; they are not stored as a preference. A collapsed heading accepts dragged speakers. **Add speaker** also offers online speakers already assigned to another chime. Moving its last speaker requires an in-app confirmation explaining that the empty source is removed while the destination keeps its identity, pairing, ringtones and settings. HA music groups remain unchanged.
+Chime cards start collapsed on every page load, return visit and restored page. Only the title, a status light (green active/connected, orange needs attention, blue busy), expansion arrow and actions menu remain visible. Expand/collapse choices stay in memory through background status polls; they are not stored as a preference. A collapsed heading accepts dragged speakers. **Add speaker** also offers online speakers already assigned to another chime. Moving its last speaker requires an in-app confirmation explaining that the empty source is removed while the destination keeps its identity, pairing, ringtones and settings. HA music groups remain unchanged.
 
 Remove and × work during preparation, adoption, offline conditions and management outages. They immediately remove membership locally; an unused chime with no saved identity can be discarded without a Protect request. Existing identities become inactive cleanup records. Only these explicit requests are automatically retried against their original console, with authenticated identity ownership checks and confirmed absence/deletion before final cleanup. Historical unconfirmed records are not automatically deleted. A visible pending-cleanup notice explains when Protect or account setup is still needed. Without a Protect account the app can neither delete the chime in Protect nor observe its deletion, because the removed virtual chime is already stopped. The notice then asks you to remove the offline chime in the Protect app and offers **I removed it in Protect** per chime; after an in-app confirmation the saved identity and ringtones are erased locally, exactly as after a confirmed Protect deletion. No Protect request is sent.
 

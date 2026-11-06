@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.6
+
+- Show a small status light before each chime's name, so collapsed chimes still show their state: green when active or connected, orange when something needs attention (offline, adopt or configure in Protect, removal not confirmed), blue while busy (preparing, adopting, checking). Hover shows the status; screen readers hear it with the name.
+
 ## 0.5.5
 
 - Show a temporary automatic-adoption delay (for example Protect limiting sign-ins right after connecting an account) as blue **Adopting in Protect** with *Protect is busy. Retrying automatically.* instead of **Automatic adoption needs attention**. Access problems, exhausted attempts and delays lasting several retries still ask for attention.
