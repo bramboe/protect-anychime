@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.9
+
+- Show Test chime and its volume control only after Protect confirms configuration; keep offline tests disabled and removal available.
+
+- Retry temporary adoption failures with backoff without exhausting the adoption budget. Pause adoption across chimes after Protect rate limits, and defer configuration polling during that cooldown.
+- Explain the difference between console certificate confirmation and the local Protect management account.
+
+- Expand the receiving chime after a successful speaker addition or move. Page refreshes and revisits still start with all chimes collapsed.
+
 ## 0.4.8
 
 - Keep the chime menu fixed in the outer viewport while the page remains scrollable. Close on an outside click or Escape, without dismissing on touch scrolling or slider drags.

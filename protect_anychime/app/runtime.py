@@ -49,6 +49,7 @@ class NativeWorker:
         self._network_issues={}
         self.auto_adopter=None
         self._auto_adopt_state={}
+        self._auto_adopt_after=0
         self.adoption_checker=None
         self.name_synchronizer=None
         self._names_synced={}
@@ -439,16 +440,35 @@ class NativeWorker:
             if not self._entry_enabled(key):continue
             now=time.monotonic();state=self._auto_adopt_state.get(key,{})
             if state.get('identity')!=identity:state={'identity':identity,'attempts':0,'last':-float('inf')}
-            if state['attempts']>=3 or now-state['last']<30:continue
+            if now<self._auto_adopt_after:return
+            if state['attempts']>=3 or now<state.get('retry_after',0) or now-state['last']<30:continue
             state['last']=now;self._auto_adopt_state[key]=state
             try:
                 result=await asyncio.to_thread(self.auto_adopter,key)
+                state.pop('error',None);state.pop('temporary_failures',None);state.pop('retry_after',None)
                 if not result.get('retry_later'):
                     state['attempts']+=1;state.pop('error',None)
                     if state['attempts']==3:print('Automatic chime adoption is not confirmed after three attempts. Check adoption and account permissions in Protect.',flush=True)
-            except Exception:
-                state['attempts']+=1;state['error']=True
-                print('Automatic chime adoption unavailable; configure or adopt the chime in Protect.',flush=True)
+            except Exception as error:
+                kind=getattr(error,'kind','timeout' if isinstance(error,TimeoutError) else 'management_error')
+                http=getattr(error,'http_status',None)
+                transient=kind in ('rate_limit','timeout','network') or (type(http) is int and 500<=http<=599)
+                state['error']=True
+                if transient:
+                    failures=state.get('temporary_failures',0)+1;state['temporary_failures']=failures
+                    delay=min(300,60*2**min(failures-1,3));state['retry_after']=now+delay
+                    if kind=='rate_limit' or http==429:
+                        # Protect rate limits the console, not just this chime.
+                        self._auto_adopt_after=now+delay
+                        self._configuration_after=max(self._configuration_after,now+delay)
+                    if now-state.get('logged',-float('inf'))>=300:
+                        detail=kind+(', HTTP '+str(http) if type(http) is int else '')
+                        print('Automatic chime adoption temporarily unavailable ('+detail+'). Retrying automatically in '+str(delay)+' seconds; no adoption attempt consumed.',flush=True)
+                        state['logged']=now
+                    if kind=='rate_limit' or http==429:return
+                else:
+                    state['attempts']+=1
+                    print('Automatic chime adoption unavailable. Check the local Protect account, console access and certificate trust. Check app logs if this persists.',flush=True)
 
     async def _repair_stale_adoptions(self):
         self._adoption_checked={key:device for key,device in self._adoption_checked.items() if key in self.nodes}
