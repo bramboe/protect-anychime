@@ -4,11 +4,24 @@ class AnyChimeDialogHost {
     this.source=source;this.nodes=ids.map(id=>source.getElementById(id)).filter(Boolean);
     this.style=source.querySelector('style')?.textContent||'';this.onViewport=onViewport;
     this.root=source;this.host=null;this.target=source;this.events=events;this.documents=[];
+    for(const node of this.nodes)node.addEventListener('close',()=>{
+      if(!node.open&&typeof node.hidePopover==='function'&&node.matches(':popover-open'))node.hidePopover();
+    });
     this.mount();
     source.defaultView.addEventListener('pagehide',()=>this.release());
     source.defaultView.addEventListener('pageshow',()=>this.mount());
   }
   find(id) {return this.root.getElementById(id);}
+  showMenu(node) {
+    if(node.open)return;
+    node.show();
+    // The browser top layer avoids Safari scroll-container painting and stacking
+    // issues while remaining non-modal: the underlying page can still scroll.
+    if(typeof node.showPopover==='function'){
+      try {node.popover='manual';node.showPopover();}
+      catch {node.removeAttribute('popover');}
+    }
+  }
   mount() {
     if(this.host?.isConnected)return;
     const view=this.source.defaultView;let target=this.source;

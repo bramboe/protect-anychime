@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const context={};vm.createContext(context);vm.runInContext(fs.readFileSync('protect_anychime/app/assets/protect-events.js','utf8')+';this.Feed=AnyChimeProtectEvents;',context);
+const feed=new context.Feed(),event=(id,type='removed')=>({id,type,key:'primary'}),consume=(session,items)=>feed.consume({session,items});
+assert.equal(consume('a',[event(1)]).length,0);
+assert.equal(consume('a',[event(1),event(2)]).length,1);
+assert.equal(consume('a',[event(1),event(2)]).length,0);
+assert.equal(feed.consume(null).length,0);
+assert.equal(consume('a',[event(3,'unknown')]).length,0);
+assert.equal(consume('a',[event(3,'configured')])[0].type,'configured');
+assert.equal(consume('b',[event(1),event(2)]).length,0);
+assert.equal(consume('b',[event(3)])[0].id,3);
+feed.reset();assert.equal(consume('b',[event(3),event(4)]).length,0);
+console.log('Protect notification deduplication, initial load and revisit checks passed.');

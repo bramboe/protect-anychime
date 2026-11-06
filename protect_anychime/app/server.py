@@ -24,7 +24,7 @@ from manual_timing import ManualTiming
 
 ROOT = Path(__file__).resolve().parent
 NATIVE = NativeWorker()
-VERSION = "0.4.9"
+VERSION = "0.4.10"
 DEFAULT_PORT = 48200
 SELECTION_LOCK = NATIVE.selection_lock
 DATA_ROOT = Path(os.environ.get("ANYCHIME_DATA_DIR", "/data"))
@@ -197,7 +197,7 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/":
             return self.respond(200, (ROOT / "index.html").read_bytes(),
                                 "text/html; charset=utf-8")
-        if route in ('/assets/timing.js','/assets/speakers.js','/assets/chime-status.js','/assets/dialog-host.js'):
+        if route in ('/assets/timing.js','/assets/speakers.js','/assets/chime-status.js','/assets/dialog-host.js','/assets/protect-events.js'):
             return self.respond(200,(ROOT/'assets'/route.rsplit('/',1)[1]).read_bytes(),'application/javascript')
         if route == "/assets/sortable.min.js":
             return self.respond(200,(ROOT/'assets'/'sortable.min.js').read_bytes(),'application/javascript')
@@ -308,6 +308,15 @@ class Handler(BaseHTTPRequestHandler):
                 if route.endswith('/remove') and isinstance(error,OSError):
                     print('Chime removal could not be saved ('+type(error).__name__+'). Check app storage permissions and free space.',flush=True)
                     return self.respond(400,{'error':'App storage could not be updated. Check the app logs.'})
+                if isinstance(error,management.ManagementError):
+                    operation='test chime' if route.endswith('/test') else 'prepare adoption' if route.endswith('/prepare-adoption') else 'remove chime' if route.endswith('/remove') else 'inspect chimes'
+                    print('Protect management failed: '+operation+' ('+error.kind+(', HTTP '+str(error.http_status) if error.http_status else '')+'). No request data or credentials logged.',flush=True)
+                    if error.kind=='rate_limit':message='Protect is temporarily limiting requests (HTTP 429). Wait a minute, then try again. No automatic test retry was sent.'
+                    elif error.kind=='authentication':message='Protect refused access. Check the local account permissions in the HA app Configuration. Check app logs.'
+                    elif error.http_status is not None:
+                        message='Protect could not complete this request (HTTP '+str(error.http_status)+'). Check app logs. Tests are not retried automatically because playback may already have started.'
+                    else:message=str(error)
+                    return self.respond(400,{'error':message,'kind':error.kind,'http_status':error.http_status})
                 message = str(error) if isinstance(error,ValueError) else 'Protect management could not be completed.'
                 return self.respond(400,{"error":message})
         if route in ("/api/migration/export", "/api/migration/import"):

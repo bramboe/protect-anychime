@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import re
+import secrets
 import threading
 import time
 import speakers
@@ -39,6 +40,9 @@ class NativeWorker:
         self._removal_retries={}
         self.configuration_checker=None
         self._configuration_state={}
+        self._protect_event_session=secrets.token_hex(8)
+        self._protect_events=[]
+        self._protect_event_sequence=0
         self._configuration_after=0
         self._configuration_failed=False
         self._configuration_failures=0
@@ -62,7 +66,7 @@ class NativeWorker:
             for chime in chimes:
                 observed=self._configuration_state.get(chime['key'],{})
                 if observed.get('_device_id')==chime.get('device_id'):
-                    chime.update({k:v for k,v in observed.items() if k!='_device_id'})
+                    chime.update({k:v for k,v in observed.items() if not k.startswith('_')})
                 chime['configuration_check_failed']=self._configuration_failed
                 chime['configuration_check_retrying']=self._configuration_failures>0
                 adoption=self._auto_adopt_state.get(chime['key'],{})
@@ -71,6 +75,7 @@ class NativeWorker:
             connected=sum(c.get('connected',False) for c in chimes)
             return {'auto_adoption_error':any(v.get('error') for v in self._auto_adopt_state.values()),'auto_adopt_enabled':self.options.get('auto_adopt_chimes') is True,'enabled':bool(self.thread and not self.stop_event.is_set()),
                     'connected':bool(connected),'connected_count':connected,
+                    'protect_events':{'session':self._protect_event_session,'items':copy.deepcopy(self._protect_events)},
                     'chimes':chimes,'runtime_error':self.error or self.cleanup_error,'diagnostics':dict(self.diagnostics),
                     'known_chimes':(self.registry.snapshot() if self.registry is not None else []),
                     'membership_migration':self.registry.migration.status(self.registry.snapshot()) if self.registry is not None else {},
@@ -250,10 +255,19 @@ class NativeWorker:
         else:
             asyncio.run(finalize())
 
+    def _protect_event(self,key,event_type):
+        with self.lock:
+            self._protect_event_sequence+=1
+            self._protect_events.append({'id':self._protect_event_sequence,'key':key,'type':event_type})
+            self._protect_events=self._protect_events[-50:]
+
     def remove_from_protect(self, key):
         if self.registry is None:
             raise ValueError('The bridge is still starting.')
+        before=next((e for e in self.registry.snapshot() if e['key']==key),{})
         result = self.registry.deactivate_from_protect(key)
+        if before.get('active') and not before.get('removal_requested'):
+            self._protect_event(key,'removed')
         with self.lock:
             self._discovery = [item for item in self._discovery if item.get('key') != key]
         node = self.nodes.get(key)
@@ -399,6 +413,15 @@ class NativeWorker:
             result=await asyncio.to_thread(self.configuration_checker)
             with self.lock:
                 recovered=self._configuration_failed
+                for key,current in result.items():
+                    previous=self._configuration_state.get(key)
+                    if not previous or previous.get('_device_id')!=current.get('_device_id'):continue
+                    event=None
+                    if current.get('protect_configured') is True and previous.get('protect_configured') is not True:event='configured'
+                    elif current.get('protect_configured') is False and previous.get('protect_configured') is True:event='unconfigured'
+                    elif current.get('protect_adopted') is True and previous.get('protect_adopted') is False:event='adopted'
+                    elif previous.get('_settings_revision') and current.get('_settings_revision') and previous['_settings_revision']!=current['_settings_revision']:event='settings_changed'
+                    if event:self._protect_event(key,event)
                 self._configuration_state=result
                 self._configuration_failed=False
                 self._configuration_failures=0

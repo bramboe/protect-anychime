@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.10
+
+- Notify the open app when Protect removes, adopts, configures or changes settings on an owned chime. Suppress initial observations, historical notifications and duplicate local removal messages.
+
+- Promote the non-modal chime menu into the browser top layer where supported, keeping page scrolling available and avoiding ancestor scrolling/stacking effects.
+- Log explicit management failures with operation, error category and HTTP status. Distinguish rate limits, access failures and upstream errors in the UI; never automatically retry a sound test.
+
 ## 0.4.9
 
 - Show Test chime and its volume control only after Protect confirms configuration; keep offline tests disabled and removal available.

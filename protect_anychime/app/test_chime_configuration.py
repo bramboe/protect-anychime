@@ -44,6 +44,16 @@ class ConfigurationTests(unittest.TestCase):
         original=self.client.devices[0].copy()
         for devices in ([{**original,'anonymousDeviceId':'foreign'}],[{**original,'type':'physical'}],[original,original],[]):
             self.client.devices=devices;self.assertEqual(self.observed(),{})
+    def test_notification_revision_ignores_order_and_unrelated_ring_metadata(self):
+        first={'cameraId':'a'*24,'volume':10,'repeatTimes':1,'ringtoneId':'b'*24}
+        second={'cameraId':'c'*24,'volume':20,'repeatTimes':1,'ringtoneId':'d'*24}
+        remote=self.client.devices[0];remote.update(cameraIds=['a'*24,'c'*24],ringSettings=[first,second])
+        revision=self.observed()['_settings_revision']
+        remote.update(cameraIds=['c'*24,'a'*24],ringSettings=[{**second,'lastUpdated':999},first])
+        self.assertEqual(self.observed()['_settings_revision'],revision)
+        remote['ringSettings'][0]['volume']=25
+        self.assertNotEqual(self.observed()['_settings_revision'],revision)
+
     def test_unconfigured_account_does_not_connect(self):
         self.assertEqual(self.manager.chime_configuration('10.23.45.2',self.worker),{})
         self.assertEqual(self.client.reads,0)

@@ -587,7 +587,13 @@ class ProtectManagement:
                     if isinstance(rings,list) and all(isinstance(v,dict) for v in rings):
                         if any(valid_id(v.get('cameraId')) for v in rings):configured=True
                         elif not rings and configured is None:configured=False
-                    result[key]={'_device_id':identity['device_id'],'protect_adopted':remote.get('isAdopted') is True,
+                    settings={k:remote[k] for k in ('volume','repeatTimes') if k in remote}
+                    if isinstance(cameras,list):settings['cameraIds']=sorted(v for v in cameras if valid_id(v))
+                    if isinstance(rings,list):
+                        normalized=[{k:r[k] for k in ('cameraId','volume','repeatTimes','ringtoneId') if k in r} for r in rings if isinstance(r,dict)]
+                        settings['ringSettings']=sorted(normalized,key=lambda r:json.dumps(r,sort_keys=True))
+                    revision=hashlib.sha256(json.dumps(settings,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+                    result[key]={'_settings_revision':revision,'_device_id':identity['device_id'],'protect_adopted':remote.get('isAdopted') is True,
                         'protect_adopting':remote.get('isAdopting') is True,'protect_configured':configured}
                 return result
         return self._run(asyncio.wait_for(inspect(),8))
