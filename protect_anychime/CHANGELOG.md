@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.8
+
+- Hide **Drop a speaker here to create a new chime** when no online, unassigned speaker is left. It still appears while you drag or keyboard-move a chime member, so a member can still become a chime of its own.
+
 ## 0.5.7
 
 - Remove the moved Protect account options from the Home Assistant Configuration tab; the app now has no HA options. An account saved there by an older version is still moved into the app on the first start, read from Supervisor's stored options, and then removed there.

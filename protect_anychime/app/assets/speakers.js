@@ -62,7 +62,9 @@ function render(){
   if(mutationKeys.has(chime.key)||cardMessages.has(chime.key)){const note=document.createElement('p');note.className='chime-action-feedback'+(mutationKeys.has(chime.key)?' working':' warning');note.textContent=mutationKeys.has(chime.key)?mutationLabel:cardMessages.get(chime.key);card.append(note);}
   setupSorting(header,chime.key);setupSorting(list,chime.key);area.append(card);
  }
- const drop=document.createElement('div');drop.className='new-chime-drop';drop.textContent='Drop a speaker here to create a new chime';destination(drop,null);setupSorting(drop,null);area.append(drop);
+ // Without an online, unassigned speaker the zone only appears while a member is being moved.
+ const addable=rows.some(r=>r.available&&!savedEntities.has(r.entity_id));
+ const drop=document.createElement('div');drop.className='new-chime-drop'+(addable?'':' only-while-moving');drop.textContent='Drop a speaker here to create a new chime';destination(drop,null);setupSorting(drop,null);area.append(drop);
  const availableHeading=document.createElement('h3');availableHeading.textContent='Available speakers';const available=document.createElement('div');available.className='available-list';
  for(const row of [...rows].filter(r=>!savedEntities.has(r.entity_id)&&(!query||[r.name,r.manufacturer,r.model].join(' ').toLocaleLowerCase().includes(query))).sort((a,b)=>Number(b.available)-Number(a.available)))available.append(memberRow(row));
  if(!available.children.length){const note=document.createElement('p');note.className='note';note.textContent='No more speakers available.';available.append(note);}
