@@ -54,24 +54,66 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(self.client.reads,0)
 
 class PollTests(unittest.IsolatedAsyncioTestCase):
-    async def test_throttle_and_failure_clear_stale_success(self):
+    async def poll(self, worker, now):
+        with patch('runtime.time.monotonic',return_value=now):await worker._check_configuration()
+
+    async def test_throttle_preserves_confirmed_pairing_on_one_failure(self):
         worker=NativeWorker();worker.configuration_checker=Mock(return_value={'primary':{'_device_id':'own','protect_configured':True}})
-        with patch('runtime.time.monotonic',return_value=100):
-            await worker._check_configuration();await worker._check_configuration()
+        await self.poll(worker,100);await self.poll(worker,111)
         worker.configuration_checker.assert_called_once()
+        worker.configuration_checker.side_effect=ManagementError('private-response',kind='timeout')
+        await self.poll(worker,131)
         self.assertTrue(worker._configuration_state['primary']['protect_configured'])
-        worker.configuration_checker.side_effect=ManagementError('private-response')
-        with patch('runtime.time.monotonic',return_value=111):await worker._check_configuration()
+        self.assertFalse(worker._configuration_failed)
+        self.assertEqual(worker._configuration_after,146)
+        worker.configuration_checker.side_effect=None
+        await self.poll(worker,146)
+        self.assertEqual(worker._configuration_failures,0)
+        self.assertFalse(worker._configuration_failed)
+
+    async def test_warning_requires_repeated_failures_and_ninety_seconds(self):
+        worker=NativeWorker();worker.configuration_checker=Mock(side_effect=ManagementError('private',kind='network'))
+        for now in (100,115,145):
+            await self.poll(worker,now)
+            self.assertFalse(worker._configuration_failed)
+        await self.poll(worker,205)
+        self.assertTrue(worker._configuration_failed)
+        self.assertEqual(worker._configuration_after,265)
+
+    async def test_cached_evidence_expires_and_failure_flags_do_not_mask_live_disconnect(self):
+        worker=NativeWorker();worker.configuration_checker=Mock(return_value={'primary':{'_device_id':'own','protect_configured':True}})
+        worker._statuses=[{'key':'primary','device_id':'own','connected':False,'adopted':True}]
+        await self.poll(worker,100)
+        worker.configuration_checker.side_effect=TimeoutError()
+        await self.poll(worker,401)
         self.assertEqual(worker._configuration_state,{})
         self.assertTrue(worker._configuration_failed)
-    async def test_log_reference_has_a_safe_log_entry_without_repeated_spam(self):
-        worker=NativeWorker();worker.configuration_checker=Mock(side_effect=ManagementError('secret-response'))
+        self.assertFalse(worker.status()['chimes'][0]['connected'])
+
+    async def test_log_reference_has_safe_categorized_log_without_repeated_spam(self):
+        worker=NativeWorker();worker.configuration_checker=Mock(side_effect=ManagementError('secret-response',kind='rate_limit',http_status=429))
         with patch('builtins.print') as log:
-            with patch('runtime.time.monotonic',return_value=100):await worker._check_configuration()
-            with patch('runtime.time.monotonic',return_value=111):await worker._check_configuration()
-        log.assert_called_once()
-        self.assertIn('Protect configuration check failed (ManagementError)',log.call_args.args[0])
-        self.assertNotIn('secret-response',log.call_args.args[0])
+            for now in (100,115,145):await self.poll(worker,now)
+            log.assert_called_once()
+            self.assertIn('rate_limit, HTTP 429',log.call_args.args[0])
+            self.assertNotIn('secret-response',log.call_args.args[0])
+            await self.poll(worker,205)
+            self.assertEqual(log.call_count,2)
+            self.assertIn('remain unavailable',log.call_args.args[0])
+            worker.configuration_checker.side_effect=None;worker.configuration_checker.return_value={}
+            await self.poll(worker,265)
+            self.assertEqual(log.call_count,3)
+            self.assertIn('recovered',log.call_args.args[0])
+
+    async def test_success_resets_failure_episode(self):
+        worker=NativeWorker();worker.configuration_checker=Mock(side_effect=TimeoutError())
+        await self.poll(worker,100)
+        worker.configuration_checker.side_effect=None;worker.configuration_checker.return_value={}
+        await self.poll(worker,115)
+        worker.configuration_checker.side_effect=TimeoutError()
+        await self.poll(worker,146)
+        self.assertEqual(worker._configuration_failures,1)
+        self.assertFalse(worker._configuration_failed)
 
     async def test_network_problem_logs_once_and_logs_again_after_recovery(self):
         worker=NativeWorker();problem={'state':'permission_required','reason':'Permission denied: /proc/net/route'}
@@ -90,3 +132,14 @@ class PollTests(unittest.IsolatedAsyncioTestCase):
         worker._configuration_state['primary']['_device_id']='new'
         observed=worker.status()['chimes'][0]
         self.assertTrue(observed['protect_configured']);self.assertNotIn('_device_id',observed)
+
+
+class ErrorClassificationTests(unittest.TestCase):
+    def test_transport_categories_do_not_expose_arbitrary_error_text(self):
+        import ssl
+        import aiohttp
+        for exception,kind in ((TimeoutError('private'),'timeout'),(ssl.SSLError('private'),'certificate'),(aiohttp.ClientConnectionError('private'),'network'),(ValueError('private'),'invalid_response')):
+            async def fail():raise exception
+            with self.assertRaises(ManagementError) as caught:ProtectManagement._run(fail())
+            self.assertEqual(caught.exception.kind,kind)
+            self.assertNotIn('private',str(caught.exception))

@@ -38,6 +38,11 @@ class NativeWorker:
         self._configuration_state={}
         self._configuration_after=0
         self._configuration_failed=False
+        self._configuration_failures=0
+        self._configuration_first_failure=None
+        self._configuration_last_success=None
+        self._configuration_log_at=float('-inf')
+        self._configuration_log_kind=None
         self._network_issues={}
         self.auto_adopter=None
         self._auto_adopt_state={}
@@ -55,6 +60,7 @@ class NativeWorker:
                 if observed.get('_device_id')==chime.get('device_id'):
                     chime.update({k:v for k,v in observed.items() if k!='_device_id'})
                 chime['configuration_check_failed']=self._configuration_failed
+                chime['configuration_check_retrying']=self._configuration_failures>0
                 adoption=self._auto_adopt_state.get(chime['key'],{})
                 chime['auto_adoption_failed']=bool(adoption.get('error'))
                 chime['auto_adoption_exhausted']=adoption.get('attempts',0)>=3
@@ -327,20 +333,44 @@ class NativeWorker:
             self._network_issues[key]=issue
 
     async def _check_configuration(self):
-        if self.configuration_checker is None or time.monotonic()<self._configuration_after:return
-        self._configuration_after=time.monotonic()+10
+        now=time.monotonic()
+        if self.configuration_checker is None or now<self._configuration_after:return
+        # A successful poll already checks every owned chime in one request.
+        self._configuration_after=now+30
         try:
             result=await asyncio.to_thread(self.configuration_checker)
             with self.lock:
+                recovered=self._configuration_failed
                 self._configuration_state=result
                 self._configuration_failed=False
+                self._configuration_failures=0
+                self._configuration_first_failure=None
+                self._configuration_last_success=time.monotonic()
+            if recovered:print('Protect setup checks recovered. Current configuration confirmed.',flush=True)
         except Exception as error:
-            if not self._configuration_failed:
-                print('Protect configuration check failed ('+type(error).__name__+'). Check the local Protect account, console access and certificate trust. Retrying automatically.',flush=True)
-            # Never keep showing an old green pairing after a failed refresh.
+            now=time.monotonic()
+            kind=getattr(error,'kind','timeout' if isinstance(error,TimeoutError) else 'management_error')
+            if kind not in {'management_error','timeout','certificate','authentication','rate_limit','http_error','network','invalid_response'}:kind='management_error'
+            http=getattr(error,'http_status',None)
+            detail=kind+(', HTTP '+str(http) if type(http) is int and 100<=http<=599 else '')
             with self.lock:
-                self._configuration_state={}
-                self._configuration_failed=True
+                was_failed=self._configuration_failed
+                self._configuration_failures+=1
+                if self._configuration_first_failure is None:self._configuration_first_failure=now
+                elapsed=now-self._configuration_first_failure
+                stale=self._configuration_last_success is not None and now-self._configuration_last_success>=300
+                self._configuration_failed=(self._configuration_failures>=3 and elapsed>=90) or stale
+                # A short failed query cannot invalidate a confirmed pairing.
+                # Expire observations after five minutes without any success.
+                if stale:self._configuration_state={}
+                delay=min(60,15*2**min(self._configuration_failures-1,2))
+                self._configuration_after=now+delay
+                should_log=(self._configuration_failed and not was_failed) or now-self._configuration_log_at>=300 or detail!=self._configuration_log_kind
+                if should_log:
+                    self._configuration_log_at=now;self._configuration_log_kind=detail
+            if should_log:
+                prefix='Protect setup checks remain unavailable' if self._configuration_failed else 'Protect setup check temporarily unavailable'
+                print(prefix+' ('+detail+'). Retrying automatically in '+str(delay)+' seconds. The live chime connection is monitored separately.',flush=True)
 
     async def _auto_adopt_new_chimes(self):
         if self.options.get('auto_adopt_chimes') is not True or self.auto_adopter is None:return

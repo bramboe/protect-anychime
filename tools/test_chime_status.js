@@ -25,4 +25,6 @@ check({...connected,protect_configured:true},'Removal not confirmed','warning',c
 check({state:'waiting_dhcp'},'Preparing chime','info');
 check({state:'permission_required'},'Network permissions need attention. Check app logs.','warning');
 check({state:'error'},'Setup needs attention. Check app logs.','warning');
-console.log('17 chime lifecycle checks passed. No audio or network requests.');
+check({...connected,protect_configured:true,configuration_check_retrying:true,configuration_check_failed:false},'Active as chime','success');
+check({...connected,connected:false,configuration_check_retrying:true,configuration_check_failed:false},'Reconnecting to Protect','warning');
+console.log('19 chime lifecycle checks passed. No audio or network requests.');

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.6
+
+- Keep confirmed Protect pairing status through short query failures; continue monitoring the actual chime connection independently.
+- Poll setup every 30 seconds. Retry failed reads after 15, 30 and then 60 seconds. Show a warning only after at least three consecutive failures spanning 90 seconds, or after five minutes without confirmed data.
+- Expire cached setup data after five minutes and clear it on a successful read that no longer confirms ownership or pairing.
+- Categorize management failures safely in logs, including HTTP 401/403, rate limiting, certificate errors and timeouts. Limit repeated transient warnings and log persistent failure and recovery.
+
 ## 0.4.5
 
 - Remove the maturity label from the interface, documentation and app metadata.

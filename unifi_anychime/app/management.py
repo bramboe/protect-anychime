@@ -21,7 +21,10 @@ from native import _PinnedConnector
 
 
 class ManagementError(ValueError):
-    pass
+    def __init__(self, message, *, kind='management_error', http_status=None):
+        super().__init__(message)
+        self.kind=kind if kind in {'management_error','timeout','certificate','authentication','rate_limit','http_error','network','invalid_response'} else 'management_error'
+        self.http_status=http_status if type(http_status) is int and 100<=http_status<=599 else None
 
 
 def _mac(value):
@@ -83,9 +86,9 @@ class ProtectSession:
         async with self.session.request(method, 'https://' + self.account['host'] + path,
                 json=body if login or rename or play or adopt else None, headers=headers, allow_redirects=False) as response:
             if response.status in (401, 403):
-                raise ManagementError('Protect refused access. Use a local user with Protect Full Management permissions.')
+                raise ManagementError('Protect refused access. Use a local user with Protect Full Management permissions.',kind='authentication',http_status=response.status)
             if response.status not in (200, 204):
-                raise ManagementError('Protect did not accept the management request. Check the account and console.')
+                raise ManagementError('Protect did not accept the management request. Check the account and console.',kind='rate_limit' if response.status==429 else 'http_error',http_status=response.status)
             if response.headers.get('x-csrf-token'):
                 self.csrf = response.headers['x-csrf-token']
             if login:
@@ -101,7 +104,7 @@ class ProtectSession:
             try:
                 return json.loads(raw)
             except (ValueError, UnicodeError):
-                raise ManagementError('Protect returned an invalid response.') from None
+                raise ManagementError('Protect returned an invalid response.',kind='invalid_response') from None
 
     async def chimes(self):
         data = await self.request('GET', '/proxy/protect/api/chimes')
@@ -362,8 +365,14 @@ class ProtectManagement:
             return asyncio.run(bounded())
         except ManagementError:
             raise
-        except (ValueError, OSError, aiohttp.ClientError, TimeoutError):
-            raise ManagementError('Could not reach or verify Protect. No automatic retry; check the console and try again.') from None
+        except (ssl.SSLError, aiohttp.ClientSSLError):
+            raise ManagementError('Protect certificate verification failed.',kind='certificate') from None
+        except TimeoutError:
+            raise ManagementError('The Protect request timed out.',kind='timeout') from None
+        except (OSError, aiohttp.ClientError):
+            raise ManagementError('Could not reach Protect.',kind='network') from None
+        except ValueError:
+            raise ManagementError('Protect returned invalid data.',kind='invalid_response') from None
 
     def auto_adopt(self,host,key,worker):
         target=worker.removal_identity(key);node=worker.nodes.get(key)
