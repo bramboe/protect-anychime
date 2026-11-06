@@ -1,6 +1,6 @@
 # Protect AnyChime
 
-Any speaker can be a chime. Experimental Home Assistant app for delivering UniFi Protect chime requests to supported third-party Home Assistant media players. Independent project; not an official Ubiquiti product.
+Any speaker can be a chime. Home Assistant app for delivering UniFi Protect chime requests to supported third-party Home Assistant media players. Independent project; not an official Ubiquiti product.
 
 ## Chimes and speakers
 

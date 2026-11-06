@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.5
+
+- Remove the maturity label from the interface, documentation and app metadata.
+
 ## 0.4.4
 
 - Allow the canonical `/proc/<pid>/net/` read path in AppArmor so new chimes can discover the network route; retain enforcement and the same capabilities. Report network setup problems in orange and log their reason once per change.

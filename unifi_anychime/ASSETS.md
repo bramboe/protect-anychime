@@ -1,6 +1,6 @@
 # Artwork sources
 
-The app is an independent experimental project. Artwork remains the property
+The app is an independent project. Artwork remains the property
 of its respective manufacturer. No generated chime icon is shipped.
 
 Official PoE Smart Chime icon, used without modification:
