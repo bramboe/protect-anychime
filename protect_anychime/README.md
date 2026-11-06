@@ -57,3 +57,5 @@ Remove and × work during preparation, adoption, offline conditions and manageme
 Actions show immediate progress, prevent duplicate submissions, and report completion or an orange error in a viewport-visible message. Membership errors are also shown on the affected card. Dialogs use in-app confirmation, with an explicit Cancel, rather than browser confirmation prompts. Refreshing speakers, checking/saving a console connection, timing requests, product-information saves and explicit test requests show progress. Tests remain opt-in at the requested volume; no opening, rendering, collapsing or saving operation starts audio.
 
 The open app shows notifications for confirmed chime removals and configuration changes made in Protect.
+
+A newly created chime can take about a minute to appear in Protect. Discovery and adoption timing depend on the console and network; the app answers Protect discovery probes as soon as the virtual chime is ready. Adding a speaker to an existing chime does not require adopting another chime.

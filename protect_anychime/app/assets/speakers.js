@@ -46,7 +46,11 @@ function render(){
   const list=document.createElement('div');list.className='member-list';
   for(const entity of [...members].sort((a,b)=>Number(lookup.get(b)?.available||false)-Number(lookup.get(a)?.available||false)))list.append(memberRow(lookup.get(entity)||{entity_id:entity,name:entity,available:false},chime));
   const add=document.createElement('button');add.className='secondary add-to-chime';add.type='button';add.textContent='+ Add speaker';add.disabled=mutationBusy||!!migrationReview.required||!!chime.removal_pending;add.onclick=()=>openAddMember(chime.key);
-  content.append(state,list,add);const ring=live?.playback?.last_result;
+  content.append(state);
+  if(!live?.adopted&&live?.protect_adopted!==true&&(lifecycle.tone==='info'||lifecycle.label==='Adopt chime in Protect')){
+   const hint=document.createElement('p');hint.className='note chime-wait-hint';hint.textContent='It can take about a minute for a new chime to appear in Protect. No need to add the speaker again.';content.append(hint);
+  }
+  content.append(list,add);const ring=live?.playback?.last_result;
   if(ring?.state==='partial'||ring?.state==='failed'){const warning=document.createElement('small');warning.className='barrier-summary warning';warning.textContent=ring.state==='partial'?'Some speaker requests failed. Other requests were preserved; failed requests were not retried.':ring.reason||'The last playback request failed. Check app logs.';content.append(warning);}
   const timing=ring?.download_timing;if(timing){const note=document.createElement('small');note.className='barrier-summary';note.textContent=timing.distinct_downloads+' / '+timing.expected_downloads+' downloads · '+(timing.arrival_spread_ms??'—')+' ms arrival spread · '+timing.release_reason;content.append(note);}
   card.append(header,content);
@@ -89,7 +93,7 @@ async function mutate(path,body){
  mutationLabel=path==='chimes/remove'||body.action==='remove'?'Removing chime membership…':body.confirm_source_removal?'Moving speaker and removing the empty chime…':'Updating chime membership…';
  for(const key of mutationKeys)cardMessages.delete(key);mutationBusy=true;feedback(mutationLabel);render();
  try{const result=await api(path,{...body,confirmed:true});const pending=result.cleanup_pending||result.protect_cleanup_pending;expandAddedSpeaker=path==='chimes/members'&&['add','move'].includes(body.action);
-  const message=path==='chimes/remove'?'Chime removed.':body.action==='remove'?'Speaker removed.':body.entity_id?(owner?'Speaker moved.':'Speaker added.'):'Chime updated.';feedback(message+(pending?' Removal from Protect is pending and will retry automatically.':''),false,true);return true;
+  const message=path==='chimes/remove'?'Chime removed.':body.action==='remove'?'Speaker removed.':body.entity_id?(owner?'Speaker moved.':'Speaker added.'):'Chime updated.';const waiting=expandAddedSpeaker&&!body.target_key?' It can take about a minute for the new chime to appear in Protect. No need to add the speaker again.':'';feedback(message+waiting+(pending?' Removal from Protect is pending and will retry automatically.':''),false,true);return true;
  }catch(e){for(const key of mutationKeys)cardMessages.set(key,e.message);feedback(e.message,true);return false;}
  finally{mutationBusy=false;mutationKeys=new Set();await load();if(expandAddedSpeaker){const receiving=chimes.find(c=>c.active&&c.members?.includes(body.entity_id));if(receiving){expandedChimes.add(receiving.key);render();}}await status();}
 }

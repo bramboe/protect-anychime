@@ -76,3 +76,5 @@ Console certificate confirmation authorizes the native chime connection; the loc
 Explicit management actions log their operation, failure category and HTTP status without account details or request bodies. An upstream test failure does not necessarily mean playback was not started; sound tests are never automatically retried. The chime menu uses the browser top layer when available, without making the underlying page inert or preventing scrolling.
 
 While the app is open, confirmed Protect removals, adoption, doorbell configuration and sound-setting changes appear as notifications. Removals arrive through the native connection; configuration changes appear after a successful management poll. Initial observations, page revisits and bridge restarts do not replay old events. Notifications are held only in bounded runtime memory.
+
+A newly created chime can take about a minute to appear in Protect. Discovery and adoption timing depend on the console and network; the app answers Protect discovery probes as soon as the virtual chime is ready. Adding a speaker to an existing chime does not require adopting another chime.

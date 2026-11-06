@@ -1,6 +1,6 @@
 # Protect AnyChime project
 
-Source app version: 0.4.10. Slug: `protect_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
+Source app version: 0.4.11. Slug: `protect_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
 
 ## Chimes and speakers
 

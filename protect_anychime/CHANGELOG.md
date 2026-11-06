@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.11
+
+- Explain after creating a chime that Protect discovery can take about a minute. Keep guidance visible while preparing or awaiting adoption, and omit it when adding a member to an existing chime.
+
 ## 0.4.10
 
 - Notify the open app when Protect removes, adopts, configures or changes settings on an owned chime. Suppress initial observations, historical notifications and duplicate local removal messages.
