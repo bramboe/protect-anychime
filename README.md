@@ -24,6 +24,12 @@ node tools/test_chime_status.js
 
 Build containers with `unifi_anychime/` as their build context. Never commit HA runtime data, credentials, certificates, device identities or cached recordings. [Publication notes](docs/PUBLICATION.md) describe the release boundary.
 
+## Support
+
+If this project is useful to you, consider sponsoring my work 💙
+
+[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/bramboe) [![Donate via bunq.me](https://img.shields.io/badge/Donate-bunq.me-2E9AD0)](https://bunq.me/bramboe)
+
 ## License
 
 Project code is licensed under the [MIT License](LICENSE). Bundled SortableJS retains its own MIT notice. Manufacturer artwork and catalogue data have separate ownership and terms; see [artwork sources](unifi_anychime/ASSETS.md). MIT does not grant rights to third-party artwork or trademarks.
