@@ -31,7 +31,7 @@ The checker rejects runtime state, private/certificate files, recordings, genera
 
 ## Remaining publication decisions
 
-Project code uses the root MIT license. Review third-party artwork/catalogue distribution terms documented in `unifi_anychime/ASSETS.md`. Set the public repository URL in the root README and optional repository metadata for the chosen host. No repository is published automatically by these changes.
+Project code uses the root MIT license. Review third-party artwork/catalogue distribution terms documented in `unifi_anychime/ASSETS.md`. The configured public repository URL is `https://github.com/bramboe/protect-anychime`; it is included in the root README, repository metadata and app information. No repository is published automatically by these changes.
 
 
 Visible product name: **Protect AnyChime**. The internal app slug remains `unifi_anychime` for upgrade compatibility; no app reinstall or device reset is required for the rename. Installation-specific renderer aliases and per-installation bundled product-photo maps are not part of the source. Shared public catalogue entries and documented integration behavior are compatibility data, independent of any user inventory.

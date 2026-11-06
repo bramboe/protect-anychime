@@ -16,4 +16,4 @@ No real speaker audio was played. Acoustic behavior, every permitted subprocess 
 
 ## Publication boundary
 
-The public repository URL is still an owner-supplied publication setting; no repository was created or pushed. The root README explicitly marks the URL placeholder. Source archive generation excludes Git internals, credentials, runtime state, cached media and local build artifacts. Third-party artwork rights remain separate from the MIT code license.
+The owner confirmed `https://github.com/bramboe/protect-anychime` as the public repository URL. Repository metadata, app information and installation instructions use that URL. No repository was created or pushed by this change. Source archive generation excludes Git internals, credentials, runtime state, cached media and local build artifacts. Third-party artwork rights remain separate from the MIT code license.

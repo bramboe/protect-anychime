@@ -6,7 +6,7 @@ Any speaker can be a chime. Experimental Home Assistant app for forwarding UniFi
 
 1. Open **Settings → Apps → Install app** (called **Add-ons → Add-on store** in older HA versions).
 2. Open the **⋮** menu → **Repositories**.
-3. Add this project's public Git repository URL. **Publication pending:** the owner must replace `<REPOSITORY_URL>` with the actual repository URL before sharing these instructions.
+3. Add `https://github.com/bramboe/protect-anychime`.
 4. Find **Protect AnyChime**, install it, start it and open its web interface.
 5. Connect your Protect console, add HA speakers to a chime, then adopt and configure that chime in Protect. Optional automatic adoption does not configure doorbell pairing, ringtone or volume.
 

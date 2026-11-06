@@ -34,5 +34,6 @@
   ],
   "backup": "cold",
   "timeout": 30,
-  "apparmor": true
+  "apparmor": true,
+  "url": "https://github.com/bramboe/protect-anychime"
 }
