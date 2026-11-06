@@ -3,9 +3,11 @@ const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:a
 const sandbox = {};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../protect_anychime/app/assets/chime-status.js'), 'utf8'), sandbox);
 const chime = {}, context = {autoAdoptEnabled: true, managementReady: true};
+let checks = 0;
 const check = (live, label, tone, c=context, entry=chime) => {
   const actual=sandbox.AnyChimeStatus(entry, live, c);
-  assert.equal(actual.label,label);assert.equal(actual.tone,tone);
+  assert.equal(actual.label,label);assert.equal(actual.tone,tone);checks++;
+  return actual;
 };
 check(undefined,'Adopting in Protect','info');
 check({state:'awaiting_adoption',adopted:false},'Adopting in Protect','info');
@@ -27,4 +29,18 @@ check({state:'permission_required'},'Network permissions need attention. Check a
 check({state:'error'},'Setup needs attention. Check app logs.','warning');
 check({...connected,protect_configured:true,configuration_check_retrying:true,configuration_check_failed:false},'Active as chime','success');
 check({...connected,connected:false,configuration_check_retrying:true,configuration_check_failed:false},'Reconnecting to Protect','warning');
-console.log('19 chime lifecycle checks passed. No audio or network requests.');
+// Without an account: show the certain connection and a received ring, never a check that cannot happen.
+const noAccount={...context,managementReady:false,autoAdoptEnabled:false};
+let shown=check({...connected,protect_configured:null},'Connected to Protect','success',noAccount);
+assert.equal(shown.detail,'Pair it with your doorbell in the Protect app.');
+const now=new Date(2026,10,6,18,30),today=Math.floor(new Date(2026,10,6,18,4).getTime()/1000);
+shown=check({...connected,last_play:{received_at:today}},'Active as chime','success',{...noAccount,now});
+const clock=seconds=>new Date(seconds*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+assert.equal(shown.detail,'Last rang '+clock(today));
+const earlier=Math.floor(new Date(2026,10,2,9,15).getTime()/1000);
+shown=check({...connected,last_play:{received_at:earlier}},'Active as chime','success',{...noAccount,now});
+assert.equal(shown.detail,'Last rang '+new Date(earlier*1000).toLocaleDateString([],{day:'numeric',month:'short'})+' '+clock(earlier));
+check({...connected,connected:false,last_play:{received_at:today}},'Reconnecting to Protect','warning',noAccount);
+check({state:'awaiting_adoption',adopted:false},'Adopt chime in Protect','warning',noAccount);
+assert.equal(check({...connected,protect_configured:true},'Active as chime','success').detail,undefined);
+console.log(checks+' chime lifecycle checks passed. No audio or network requests.');

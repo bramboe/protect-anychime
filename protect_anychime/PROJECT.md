@@ -1,6 +1,6 @@
 # Protect AnyChime project
 
-Source app version: 0.5.2. Slug: `protect_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
+Source app version: 0.5.3. Slug: `protect_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
 
 ## Chimes and speakers
 
@@ -37,6 +37,8 @@ All interface and administrative API requests require the actual Supervisor ingr
 ## Chime setup status
 
 With automatic adoption enabled and a local Protect account configured, new chimes show blue **Adopting in Protect**. Once adopted and connected, an unpaired chime shows orange **Configure chime in Protect**. Pair it with a doorbell in Protect and choose its sound, volume and repetitions there. Green **Active as chime** requires a confirmed doorbell pairing and a live chime connection; default sound/volume settings count as configured. This status does not prove acoustic playback.
+
+Without a Protect account, AnyChime cannot read doorbell pairing, so it never shows a pairing check. An adopted chime with a live connection to Protect shows green **Connected to Protect** with the static hint *Pair it with your doorbell in the Protect app.* Once Protect sends a ring (a doorbell press or a test from the Protect app) it shows **Active as chime** with the time of the last ring. "Connected" means the console holds the chime's authenticated, certificate-pinned connection open, checked every 30 seconds; it is the same connection that carries rings and ringtones. The last ring is kept in memory, so after an app restart the status returns to Connected until the next ring.
 
 Pairing is read from Protect for verified installation-owned identities approximately every thirty seconds, with up to another interface refresh interval before the label changes. Missing fields stay unknown. A temporary failed refresh retains the last confirmed pairing for up to five minutes while the live chime connection is monitored separately. A warning requires at least three consecutive failures spanning ninety seconds, or evidence older than five minutes. Failed checks retry after 15, 30 and then 60 seconds; successful checks reset the failure episode. No doorbell identifiers or settings are added to the UI. Automatic adoption disabled keeps the orange **Adopt chime in Protect** instruction. Offline, migration and removal states take precedence.
 

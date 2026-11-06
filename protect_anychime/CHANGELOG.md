@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3
+
+- Without a Protect account, stop showing the orange "Check chime configuration in Protect", which could never update. An adopted, connected chime now shows green **Connected to Protect** with a static hint to pair it with a doorbell in the Protect app, and **Active as chime** with the time of the last ring once Protect has rung it.
+- With an account the doorbell pairing check is unchanged.
+
 ## 0.5.2
 
 - Set a volume per speaker, from 10 to 100% of the volume Protect requests, so louder speaker models no longer drown out quieter ones. Announcements and normal playback both use each speaker's own level; a speaker never becomes silent on its own.
