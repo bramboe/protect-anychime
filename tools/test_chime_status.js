@@ -1,7 +1,7 @@
 /* No browser, network, credentials or audio: pure lifecycle labels and colors. */
 const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict'), path = require('node:path');
 const sandbox = {};
-vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../unifi_anychime/app/assets/chime-status.js'), 'utf8'), sandbox);
+vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../protect_anychime/app/assets/chime-status.js'), 'utf8'), sandbox);
 const chime = {}, context = {autoAdoptEnabled: true, managementReady: true};
 const check = (live, label, tone, c=context, entry=chime) => {
   const actual=sandbox.AnyChimeStatus(entry, live, c);

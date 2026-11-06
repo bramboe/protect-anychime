@@ -47,3 +47,16 @@ With automatic adoption enabled and a local Protect account configured, new chim
 Pairing is read from Protect for verified installation-owned identities approximately every thirty seconds, with up to another interface refresh interval before the label changes. Missing fields stay unknown. A temporary failed refresh retains the last confirmed pairing for up to five minutes while the live chime connection is monitored separately. A warning requires at least three consecutive failures spanning ninety seconds, or evidence older than five minutes. Failed checks retry after 15, 30 and then 60 seconds; successful checks reset the failure episode. No doorbell identifiers or settings are added to the UI. Automatic adoption disabled keeps the orange **Adopt chime in Protect** instruction. Offline, migration and removal states take precedence.
 
 Warnings and errors use orange throughout the interface. Destructive Remove remains a red action. Unknown configuration states do not imply an error; confirmed check failures and exhausted adoption attempts refer to app logs, where a bounded explanation is recorded without credentials or raw controller responses. Configuration logs use safe categories such as timeout, certificate, authentication, network and HTTP status without raw responses or credentials. Repeated identical transient warnings are limited to one per five minutes; persistent failure and subsequent recovery are logged separately.
+
+## Moving from the previous app ID
+
+Home Assistant identifies an app by its internal slug, not its visible name. Version 0.4.7 uses `protect_anychime` in the `protect_anychime/` repository folder. Earlier installations use `unifi_anychime`; the renamed app installs separately and does not automatically inherit that installation's `/data` directory. An ordinary HA backup still restores the original app ID.
+
+1. Make a Home Assistant backup of the existing app. Keep it private: saved identities, keys, accounts and recordings belong to your installation.
+2. In the existing app's interface, use **Move an existing installation → Pause bridge & export backup**. This pauses its native bridge. Stop the old app in HA before starting the renamed one.
+3. Install the renamed app. Copy the local Protect account settings from the old app's HA Configuration tab if you use management or automatic adoption. Do not add speakers or establish new identities yet.
+4. Start the new app, open its web interface and import the exported backup into this fresh installation. Restart the new app after importing.
+5. Confirm that the original chimes and speaker sets return and connect to Protect. The backup preserves native device identities, controller trust, received ringtones and manual timing. Earlier exports may require the management connection to be verified again; newer exports also include its saved certificate trust.
+6. Keep the old app stopped until verification is complete. You can then uninstall the old installation. Never run both copies of the same chime identities together.
+
+Switching between a local app and a GitHub repository app can also change HA's app ID prefix. Use the same transfer process. Export/import does not copy Supervisor account options: configure the local Protect username/password and automatic-adoption preference in the new app's HA Configuration tab.

@@ -10,9 +10,9 @@ Any speaker can be a chime. Home Assistant app for forwarding UniFi Protect chim
 4. Find **Protect AnyChime**, install it, start it and open its web interface.
 5. Connect your Protect console, add HA speakers to a chime, then adopt and configure that chime in Protect. Optional automatic adoption does not configure doorbell pairing, ringtone or volume.
 
-The repository root contains `repository.yaml`; the installable app lives in [`unifi_anychime/`](unifi_anychime/). The internal slug remains `unifi_anychime`. Moving the source into this layout does not require resetting existing chimes. Switching from a local app to a separately hosted repository can produce a different HA app ID: use the documented backup/export migration instead of running both bridges with the same identities.
+The repository root contains `repository.yaml`; the installable app lives in [`protect_anychime/`](protect_anychime/). The internal slug is `protect_anychime`. Existing installations using the previous app ID must transfer their saved data before starting the renamed app. Switching from a local app to a separately hosted repository can produce a different HA app ID: use the [app ID migration guide](protect_anychime/DOCS.md#moving-from-the-previous-app-id) instead of running both bridges with the same identities.
 
-See the [app guide](unifi_anychime/README.md), [configuration and behavior](unifi_anychime/DOCS.md), [project architecture](unifi_anychime/PROJECT.md), [release notes](unifi_anychime/CHANGELOG.md) and [security model](docs/SECURITY.md).
+See the [app guide](protect_anychime/README.md), [configuration and behavior](protect_anychime/DOCS.md), [project architecture](protect_anychime/PROJECT.md), [release notes](protect_anychime/CHANGELOG.md) and [security model](docs/SECURITY.md).
 
 ## Support
 
@@ -22,4 +22,4 @@ If this project is useful to you, consider sponsoring my work 💙
 
 ## License
 
-Project code is licensed under the [MIT License](LICENSE). Bundled SortableJS retains its own MIT notice. Manufacturer artwork and catalogue data have separate ownership and terms; see [artwork sources](unifi_anychime/ASSETS.md). MIT does not grant rights to third-party artwork or trademarks.
+Project code is licensed under the [MIT License](LICENSE). Bundled SortableJS retains its own MIT notice. Manufacturer artwork and catalogue data have separate ownership and terms; see [artwork sources](protect_anychime/ASSETS.md). MIT does not grant rights to third-party artwork or trademarks.

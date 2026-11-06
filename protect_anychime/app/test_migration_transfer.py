@@ -30,6 +30,22 @@ class TransferTests(unittest.TestCase):
             self.assertEqual(json.loads((Path(new)/'speakers.json').read_text())['entities'],['media_player.room'])
             self.assertEqual((Path(new)/'native/device-key.pem').stat().st_mode&0o077,0)
 
+    def test_renamed_export_retains_management_trust_and_accepts_legacy_format(self):
+        with tempfile.TemporaryDirectory() as old:
+            root=Path(old);trust={'host':'10.23.45.1','fingerprint':'ab'*32}
+            (root/'protect-management-trust.json').write_text(json.dumps(trust))
+            raw=export_state(root,{},[])
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                files={name:archive.read(name) for name in archive.namelist()}
+            manifest=json.loads(files['migration.json'])
+            self.assertEqual(manifest['format'],'protect-anychime-migration')
+            self.assertEqual(json.loads(inspect_archive(raw)['protect-management-trust.json']),trust)
+            manifest['format']='unifi-anychime-migration'
+            files['migration.json']=json.dumps(manifest).encode();output=io.BytesIO()
+            with zipfile.ZipFile(output,'w') as archive:
+                for name,value in files.items():archive.writestr(name,value)
+            self.assertEqual(json.loads(inspect_archive(output.getvalue())['protect-management-trust.json']),trust)
+
     def test_import_does_not_replace_existing_or_partial_identity(self):
         with tempfile.TemporaryDirectory() as old, tempfile.TemporaryDirectory() as new:
             raw=export_state(old,{},[])

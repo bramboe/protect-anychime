@@ -10,6 +10,8 @@ class ReleaseLayoutTests(unittest.TestCase):
     def test_repository_contains_installable_subfolder_and_license(self):
         self.assertIn('name: Protect AnyChime',(REPOSITORY/'repository.yaml').read_text())
         self.assertTrue((ADDON/'Dockerfile').is_file())
+        self.assertEqual(ADDON.name,'protect_anychime')
+        self.assertEqual(json.loads((ADDON/'config.json').read_text())['slug'],'protect_anychime')
         self.assertIn('MIT License',(REPOSITORY/'LICENSE').read_text())
         self.assertFalse((REPOSITORY/'config.json').exists())
         self.assertFalse((REPOSITORY/'PUBLICATION.md').exists())

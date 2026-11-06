@@ -11,7 +11,7 @@ import zipfile
 
 MAX_ARCHIVE=128*1024*1024
 MAX_TOTAL=256*1024*1024
-ROOT_FILES={'managed-settings.json','speakers.json','chimes.json','product-links.json','latency-delays.json','chime-schema.json'}
+ROOT_FILES={'managed-settings.json','speakers.json','chimes.json','product-links.json','latency-delays.json','chime-schema.json','protect-management-trust.json'}
 DIRECTORIES={'native','identities','ringtones','network'}
 SETTINGS={'native_ip','controller_ip','controller_fingerprint','controller_certificate','unifi_compatibility_profile'}
 
@@ -56,7 +56,7 @@ def export_state(directory, options, selected):
         files['chimes.json']=json.dumps(entries).encode()
     if sum(map(len,files.values()))>MAX_TOTAL or len(files)>2048:
         raise ValueError('The saved data is too large to transfer.')
-    manifest={'format':'unifi-anychime-migration','version':1,
+    manifest={'format':'protect-anychime-migration','version':1,
               'files':{name:hashlib.sha256(raw).hexdigest() for name,raw in files.items()}}
     output=io.BytesIO()
     with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as archive:
@@ -89,7 +89,7 @@ def inspect_archive(raw):
         raise ValueError('The migration backup could not be read.') from None
     try:
         manifest=json.loads(files.pop('migration.json'))
-        if (manifest.get('format')!='unifi-anychime-migration' or manifest.get('version')!=1
+        if (manifest.get('format') not in {'protect-anychime-migration','unifi-anychime-migration'} or manifest.get('version')!=1
                 or manifest.get('files')!={name:hashlib.sha256(data).hexdigest() for name,data in files.items()}):
             raise ValueError('The migration backup checksum or version is invalid.')
         # Do not defer malformed settings/selections until the next startup.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.7
+
+- Align the internal app slug, repository app folder and AppArmor profile with Protect AnyChime: `protect_anychime`.
+- Document the required app-ID migration; Home Assistant installs the renamed slug separately. Preserve native identities and chime membership through private export/import and keep the previous bridge stopped.
+- Export backups using the Protect AnyChime format name while accepting earlier backup formats. Include saved Protect management certificate trust in new portable backups.
+
 ## 0.4.6
 
 - Keep confirmed Protect pairing status through short query failures; continue monitoring the actual chime connection independently.

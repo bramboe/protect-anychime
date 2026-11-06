@@ -1,6 +1,6 @@
 #include <tunables/global>
 
-profile unifi_anychime flags=(attach_disconnected,mediate_deleted) {
+profile protect_anychime flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
 
   # Required for virtual interfaces, DHCP and app-owned forwarding rules.

@@ -56,7 +56,7 @@ class ArtworkTests(unittest.TestCase):
     def test_generic_configuration_has_no_legacy_brand_fields_and_english_labels(self):
         root = Path(__file__).resolve().parents[1]
         config = json.loads((root/'config.json').read_text())
-        self.assertEqual(config['slug'],'unifi_anychime')
+        self.assertEqual(config['slug'],'protect_anychime')
         self.assertEqual(config['schema'],{'protect_username':'str','protect_password':'password','auto_adopt_chimes':'bool'})
         labels = json.loads((root/'translations/en.json').read_text())['configuration']
         self.assertEqual(set(labels), set(config['schema']))

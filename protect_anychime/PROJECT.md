@@ -1,6 +1,6 @@
 # Protect AnyChime project
 
-Source app version: 0.4.6. Slug: `unifi_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
+Source app version: 0.4.7. Slug: `protect_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
 
 ## Chimes and speakers
 
@@ -14,7 +14,7 @@ Membership API: `POST /api/chimes/members`. Add/move uses a selected entity and 
 
 The deployment model remains a Home Assistant app with host networking, ingress/media port 48200 and owned per-device management forwarding. The existing NET_ADMIN/NET_RAW requirements and installation-specific console trust remain. Account settings stay in HA app configuration. Network portability beyond the live-tested HA OS installation remains a separate validation task.
 
-Verification uses fake HA/Protect request boundaries and synthetic media bytes. Tests cover stable membership keys, member moves/detachment, last-member refusal/confirmed removal, rollback on persistence failure, fixed membership across HA group changes, migration with open transitions, old backup import, and native identity/ringtone preservation. Source hygiene is checked from the repository root with `python3 tools/check_release.py`. The root contains repository metadata and the MIT license; the installable app is in `unifi_anychime/`. No source commit is pushed automatically.
+Verification uses fake HA/Protect request boundaries and synthetic media bytes. Tests cover stable membership keys, member moves/detachment, last-member refusal/confirmed removal, rollback on persistence failure, fixed membership across HA group changes, migration with open transitions, old backup import, and native identity/ringtone preservation. Source hygiene is checked from the repository root with `python3 tools/check_release.py`. The root contains repository metadata and the MIT license; the installable app is in `protect_anychime/`. No source commit is pushed automatically.
 
 ## Timing
 

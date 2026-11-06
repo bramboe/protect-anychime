@@ -16,14 +16,14 @@ If synchronization has not supplied a requested track, the app reports it unavai
 
 ## Source boundary
 
-Publish the repository with its `unifi_anychime/` app folder, not a development workspace, HA backup or deployment data directory. Public source contains code, tests, documentation and public product metadata/artwork. It contains no real console certificate/pin, account credentials, LAN addresses, device identities, recordings, network leases or development verification dumps.
+Publish the repository with its `protect_anychime/` app folder, not a development workspace, HA backup or deployment data directory. Public source contains code, tests, documentation and public product metadata/artwork. It contains no real console certificate/pin, account credentials, LAN addresses, device identities, recordings, network leases or development verification dumps.
 
 Test certificates are generated temporarily with synthetic `.invalid` names. Test networks and entity names are fictional fixtures. Commercial manufacturer/model names in image compatibility rules identify supported products and do not represent a user's device inventory.
 
 Run from the repository root before preparing a release:
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s unifi_anychime/app -p 'test_*.py'
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s protect_anychime/app -p 'test_*.py'
 python3 tools/check_release.py
 ```
 
@@ -31,7 +31,7 @@ The checker rejects runtime state, private/certificate files, recordings, genera
 
 ## Remaining publication decisions
 
-Project code uses the root MIT license. Review third-party artwork/catalogue distribution terms documented in `unifi_anychime/ASSETS.md`. The configured public repository URL is `https://github.com/bramboe/protect-anychime`; it is included in the root README, repository metadata and app information. No repository is published automatically by these changes.
+Project code uses the root MIT license. Review third-party artwork/catalogue distribution terms documented in `protect_anychime/ASSETS.md`. The configured public repository URL is `https://github.com/bramboe/protect-anychime`; it is included in the root README, repository metadata and app information. No repository is published automatically by these changes.
 
 
-Visible product name: **Protect AnyChime**. The internal app slug remains `unifi_anychime` for upgrade compatibility; no app reinstall or device reset is required for the rename. Installation-specific renderer aliases and per-installation bundled product-photo maps are not part of the source. Shared public catalogue entries and documented integration behavior are compatibility data, independent of any user inventory.
+Visible product name: **Protect AnyChime**. The internal app slug is `protect_anychime`. Home Assistant treats the renamed app as a separate installation; existing users must transfer their private saved state using the documented migration flow. No Protect device reset or re-adoption is needed when the original identities are retained. Installation-specific renderer aliases and per-installation bundled product-photo maps are not part of the source. Shared public catalogue entries and documented integration behavior are compatibility data, independent of any user inventory.
