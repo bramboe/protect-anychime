@@ -25,7 +25,7 @@ from manual_timing import ManualTiming, SpeakerLevels
 
 ROOT = Path(__file__).resolve().parent
 NATIVE = NativeWorker()
-VERSION = "0.5.4"
+VERSION = "0.5.5"
 DEFAULT_PORT = 48200
 SELECTION_LOCK = NATIVE.selection_lock
 DATA_ROOT = Path(os.environ.get("ANYCHIME_DATA_DIR", "/data"))

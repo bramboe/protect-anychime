@@ -19,6 +19,7 @@ function AnyChimeStatus(chime, live, context) {
     if (!context.autoAdoptEnabled) return status('Adopt chime in Protect', 'warning');
     if (!context.managementReady) return status('Configure Protect account to adopt automatically', 'warning');
     if (live?.auto_adoption_failed || live?.auto_adoption_exhausted) return status('Automatic adoption needs attention. Check app logs.', 'warning');
+    if (live?.auto_adoption_retrying) return status('Adopting in Protect', 'info', 'Protect is busy. Retrying automatically.');
     return status('Adopting in Protect', 'info');
   }
   if (!live?.connected) return status('Reconnecting to Protect', 'warning');

@@ -16,6 +16,7 @@ import threading
 import time
 
 import aiohttp
+from yarl import URL
 import connection
 from connection import fetch_certificate, lan_ip
 from native import _PinnedConnector
@@ -37,11 +38,55 @@ def _mac(value):
     return value
 
 
+class SessionCache:
+    """A signed-in Protect session reused between management actions.
+
+    Consoles limit sign-ins, so actions share one session for up to TTL seconds
+    instead of signing in each time. Only session cookies and the CSRF token are
+    kept, in memory, for the exact console, certificate pin and account; nothing
+    is written to disk. A refused or expired session signs in again once.
+    """
+    TTL = 20 * 60
+
+    def __init__(self, clock=None):
+        self.clock = clock or time.monotonic
+        self.lock = threading.Lock()
+        self.entry = None
+
+    @staticmethod
+    def key(account):
+        parts = [account.get(k, '') for k in ('host', 'fingerprint', 'username', 'password')]
+        return hashlib.sha256(json.dumps(parts).encode()).hexdigest()
+
+    def get(self, account):
+        with self.lock:
+            entry = self.entry
+            if entry and entry['key'] == self.key(account) and self.clock() < entry['expires']:
+                return dict(entry['cookies']), entry['csrf']
+            return None
+
+    def put(self, account, cookies, csrf, *, fresh):
+        key = self.key(account)
+        with self.lock:
+            current = self.entry if self.entry and self.entry['key'] == key else None
+            if not fresh and current is None:
+                return
+            # Reuse never extends a session: sign in again at least every TTL.
+            expires = self.clock() + self.TTL if fresh else current['expires']
+            self.entry = {'key': key, 'cookies': dict(cookies), 'csrf': csrf, 'expires': expires}
+
+    def clear(self):
+        with self.lock:
+            self.entry = None
+
+
 class ProtectSession:
-    def __init__(self, account):
+    def __init__(self, account, cache=None):
         self.account = account
         self.session = None
         self.csrf = None
+        self.cache = cache
+        self.reused = False
 
     async def __aenter__(self):
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -52,20 +97,57 @@ class ProtectSession:
         self.session = aiohttp.ClientSession(connector=connector, trust_env=False,
             cookie_jar=aiohttp.CookieJar(unsafe=True), timeout=aiohttp.ClientTimeout(total=15))
         try:
-            await self.request('POST', '/api/auth/login', {
-                'username': self.account['username'], 'password': self.account['password'],
-                'rememberMe': False}, login=True)
-            if not self.csrf:
-                raise ManagementError('Protect did not provide a complete local session. Reconnect with a local UniFi account.')
+            cached = self.cache.get(self.account) if self.cache else None
+            if cached:
+                cookies, self.csrf = cached
+                self.session.cookie_jar.update_cookies(cookies, URL('https://' + self.account['host'] + '/'))
+                self.reused = True
+            else:
+                await self._login()
         except BaseException:
             await self.session.close()
             raise
         return self
 
+    async def _login(self):
+        self.csrf = None
+        self.reused = False
+        await self._request_once('POST', '/api/auth/login', {
+            'username': self.account['username'], 'password': self.account['password'],
+            'rememberMe': False}, login=True)
+        if not self.csrf:
+            raise ManagementError('Protect did not provide a complete local session. Reconnect with a local UniFi account.')
+        if self.cache:
+            self.cache.put(self.account, self._cookies(), self.csrf, fresh=True)
+
+    def _cookies(self):
+        try:
+            return {cookie.key: cookie.value for cookie in self.session.cookie_jar}
+        except TypeError:
+            return {}
+
     async def __aexit__(self, *_):
-        await self.session.close()
+        try:
+            if self.cache and self.csrf:
+                # Keep cookies or a CSRF token the console refreshed during this action.
+                self.cache.put(self.account, self._cookies(), self.csrf, fresh=False)
+        finally:
+            await self.session.close()
 
     async def request(self, method, path, body=None, login=False):
+        try:
+            return await self._request_once(method, path, body, login)
+        except ManagementError as error:
+            if login or not self.reused or error.kind != 'authentication':
+                raise
+            # The remembered session expired or was revoked. A refused request was
+            # not carried out, so sign in once and repeat it.
+            if self.cache:
+                self.cache.clear()
+            await self._login()
+            return await self._request_once(method, path, body, login)
+
+    async def _request_once(self, method, path, body=None, login=False):
         # No general-purpose URL or method proxy is exposed to callers.
         rename=(method=='PATCH' and re.fullmatch('/proxy/protect/api/chimes/[0-9a-f]{24}',path)
             and isinstance(body,dict) and set(body)=={'name'} and isinstance(body['name'],str)
@@ -90,8 +172,9 @@ class ProtectSession:
                 raise ManagementError('Protect refused access. Use a local user with Protect Full Management permissions.',kind='authentication',http_status=response.status)
             if response.status not in (200, 204):
                 raise ManagementError('Protect did not accept the management request. Check the account and console.',kind='rate_limit' if response.status==429 else 'http_error',http_status=response.status)
-            if response.headers.get('x-csrf-token'):
-                self.csrf = response.headers['x-csrf-token']
+            refreshed = response.headers.get('x-csrf-token') or response.headers.get('x-updated-csrf-token')
+            if refreshed:
+                self.csrf = refreshed
             if login:
                 # Drain only a bounded response, never expose a returned user/token.
                 if len(await response.content.read(2 * 1024 * 1024 + 1)) > 2 * 1024 * 1024:
@@ -163,8 +246,11 @@ class ProtectManagement:
     def __init__(self, path='/data/protect-management.json', *, fetcher=None, client_factory=ProtectSession, clock=None):
         self.path = Path(path)
         self.fetcher = fetcher or (lambda host: fetch_certificate(host, 443))
-        self.client_factory = client_factory
         self.clock = clock or time.monotonic
+        self.sessions = SessionCache(self.clock)
+        # Management actions share one signed-in session (see SessionCache).
+        self.client_factory = ((lambda account: ProtectSession(account, cache=self.sessions))
+                               if client_factory is ProtectSession else client_factory)
         self.lock = threading.RLock()
         self.pending = None
         self.revision = 0
@@ -394,6 +480,7 @@ class ProtectManagement:
         return {'configured': True, 'ready': True, 'audio_played': False}
 
     def forget(self):
+        self.sessions.clear()
         with self.lock:
             self.revision += 1
             self.pending = None

@@ -70,10 +70,13 @@ class NativeWorker:
                 chime['configuration_check_failed']=self._configuration_failed
                 chime['configuration_check_retrying']=self._configuration_failures>0
                 adoption=self._auto_adopt_state.get(chime['key'],{})
-                chime['auto_adoption_failed']=bool(adoption.get('error'))
+                # Temporary failures (rate limits, timeouts, network) are retried automatically;
+                # only persistent ones need the user's attention.
+                chime['auto_adoption_retrying']=self._adoption_retrying(adoption)
+                chime['auto_adoption_failed']=bool(adoption.get('error')) and not chime['auto_adoption_retrying']
                 chime['auto_adoption_exhausted']=adoption.get('attempts',0)>=3
             connected=sum(c.get('connected',False) for c in chimes)
-            return {'auto_adoption_error':any(v.get('error') for v in self._auto_adopt_state.values()),'auto_adopt_enabled':self.options.get('auto_adopt_chimes') is True,'enabled':bool(self.thread and not self.stop_event.is_set()),
+            return {'auto_adoption_error':any(v.get('error') and not self._adoption_retrying(v) for v in self._auto_adopt_state.values()),'auto_adopt_enabled':self.options.get('auto_adopt_chimes') is True,'enabled':bool(self.thread and not self.stop_event.is_set()),
                     'connected':bool(connected),'connected_count':connected,
                     'protect_events':{'session':self._protect_event_session,'items':copy.deepcopy(self._protect_events)},
                     'chimes':chimes,'runtime_error':self.error or self.cleanup_error,'diagnostics':dict(self.diagnostics),
@@ -84,6 +87,11 @@ class NativeWorker:
                         and e.get('removal_source')!='protect'] if self.registry is not None else []),
                     'discovery_responses':self.responder.responses if self.responder else 0,
                     'audio_played':None if any(c.get('last_play') for c in chimes) else False}
+
+    @staticmethod
+    def _adoption_retrying(state):
+        """A temporary adoption failure that is still being retried automatically."""
+        return bool(state.get('error')) and 0<state.get('temporary_failures',0)<4
 
     def configure_selection(self, entities, rows=None):
         if self.registry is None:
@@ -516,7 +524,7 @@ class NativeWorker:
                         state['logged']=now
                     if kind=='rate_limit' or http==429:return
                 else:
-                    state['attempts']+=1
+                    state['attempts']+=1;state.pop('temporary_failures',None)
                     print('Automatic chime adoption unavailable. Check the local Protect account, console access and certificate trust. Check app logs if this persists.',flush=True)
 
     async def _repair_stale_adoptions(self):

@@ -22,6 +22,8 @@ check({state:'awaiting_adoption',adopted:false},'Adopt chime in Protect','warnin
 check(undefined,'Configure Protect account to adopt automatically','warning',{...context,managementReady:false});
 check({state:'awaiting_adoption',auto_adoption_failed:true},'Automatic adoption needs attention. Check app logs.','warning');
 check({state:'awaiting_adoption',auto_adoption_exhausted:true},'Automatic adoption needs attention. Check app logs.','warning');
+const retrying=check({state:'awaiting_adoption',auto_adoption_retrying:true},'Adopting in Protect','info');
+assert.equal(retrying.detail,'Protect is busy. Retrying automatically.');
 check({...connected,protect_configured:true},'Migration needs review','warning',context,{migration_hold:true});
 check({...connected,protect_configured:true},'Removal not confirmed','warning',context,{removal_pending:true});
 check({state:'waiting_dhcp'},'Preparing chime','info');

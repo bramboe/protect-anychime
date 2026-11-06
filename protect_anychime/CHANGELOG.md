@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.5
+
+- Show a temporary automatic-adoption delay (for example Protect limiting sign-ins right after connecting an account) as blue **Adopting in Protect** with *Protect is busy. Retrying automatically.* instead of **Automatic adoption needs attention**. Access problems, exhausted attempts and delays lasting several retries still ask for attention.
+- Reuse one signed-in Protect session for up to 20 minutes instead of signing in for every management action. The pairing check ran a sign-in about every 30 seconds and actions right after connecting could make the console refuse sign-ins (HTTP 429). Only session cookies and the CSRF token are kept, in memory; an expired session signs in again once.
+
 ## 0.5.4
 
 - Finish removing a chime without a Protect account. The pending-cleanup notice now asks you to remove the offline chime in the Protect app too and offers **I removed it in Protect** per chime. After confirming, AnyChime erases that chime's saved identity and ringtones and the notice disappears. No Protect request is sent.

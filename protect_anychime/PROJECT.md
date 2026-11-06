@@ -1,6 +1,6 @@
 # Protect AnyChime project
 
-Source app version: 0.5.4. Slug: `protect_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
+Source app version: 0.5.5. Slug: `protect_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
 
 ## Chimes and speakers
 
@@ -24,6 +24,8 @@ Verification uses fake HA/Protect request boundaries and synthetic media bytes. 
 
 `announcement_sync.py` owns a bounded one-second download barrier and a server-side offset of at most 500 ms. Every effective output receives a random member token beneath a random batch token, tied to the original media path. Counts are by member token rather than IP. Responses are held before headers; probes, HEAD and later ranges bypass holding. A shared absolute release epoch avoids accumulating scheduling jitter into another full delay. Unknown tokens cannot choose offsets. Single-output delivery has no barrier or delay. Compact summaries include only counts, arrival spread and release reason.
 
+`management.py` shares one signed-in Protect session (`SessionCache`: session cookies and CSRF token in memory, bound to console, certificate pin and account) for up to 20 minutes between actions; an expired or revoked session signs in once more and repeats the refused request.
+
 `manual_timing.py` stores the existing 0–500 ms values in private `latency-delays.json` and 10–100% volume levels in `speaker-levels.json` (also carried by the migration export). The UI exposes Save and an explicit Test at 10%. No editing, saving, loading, migration or refresh operation starts audio. A grouping integration may fan out a single effective request itself, and its outputs cannot then be independently compensated here. Announcement volume is integration-specific.
 
 Download release timing is not a common acoustic clock. Whether it performs as well as leading digital silence must be checked by the user on real speakers. Keep numeric settings, but retest them after upgrade. The local pre-simplification Git snapshot preserves the previous implementation for source comparison. Removed microphone/timestamp modules and generated-cache logic must not be reintroduced as hidden alternate playback routes.
@@ -36,7 +38,7 @@ All interface and administrative API requests require the actual Supervisor ingr
 
 ## Chime setup status
 
-With automatic adoption enabled and a local Protect account configured, new chimes show blue **Adopting in Protect**. Once adopted and connected, an unpaired chime shows orange **Configure chime in Protect**. Pair it with a doorbell in Protect and choose its sound, volume and repetitions there. Green **Active as chime** requires a confirmed doorbell pairing and a live chime connection; default sound/volume settings count as configured. This status does not prove acoustic playback.
+With automatic adoption enabled and a local Protect account configured, new chimes show blue **Adopting in Protect**. A temporary rate limit, timeout or network failure keeps that status, with *Protect is busy. Retrying automatically.*; only an access problem, three unconfirmed attempts or a temporary problem that lasts four retries (about ten minutes) shows **Automatic adoption needs attention**. Once adopted and connected, an unpaired chime shows orange **Configure chime in Protect**. Pair it with a doorbell in Protect and choose its sound, volume and repetitions there. Green **Active as chime** requires a confirmed doorbell pairing and a live chime connection; default sound/volume settings count as configured. This status does not prove acoustic playback.
 
 Without a Protect account, AnyChime cannot read doorbell pairing, so it never shows a pairing check. An adopted chime with a live connection to Protect shows green **Connected to Protect** with the static hint *Pair it with your doorbell in the Protect app.* Once Protect sends a ring (a doorbell press or a test from the Protect app) it shows **Active as chime** with the time of the last ring. "Connected" means the console holds the chime's authenticated, certificate-pinned connection open, checked every 30 seconds; it is the same connection that carries rings and ringtones. The last ring is kept in memory, so after an app restart the status returns to Connected until the next ring.
 

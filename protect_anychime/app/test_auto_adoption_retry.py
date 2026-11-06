@@ -40,6 +40,28 @@ class AdoptionRetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(worker._auto_adopt_state['a']['attempts'],0)
             self.assertEqual(worker._auto_adopt_state['a']['temporary_failures'],4)
 
+    async def test_status_shows_temporary_failures_as_retrying_not_failed(self):
+        worker=self.worker(ManagementError('busy',kind='rate_limit',http_status=429))
+        await self.poll(worker,100)
+        worker._statuses=[{'key':'a'},{'key':'b'}]
+        status=worker.status()
+        chime=next(c for c in status['chimes'] if c['key']=='a')
+        self.assertTrue(chime['auto_adoption_retrying']);self.assertFalse(chime['auto_adoption_failed'])
+        self.assertFalse(status['auto_adoption_error'])
+        # A temporary problem that persists for several retries does need attention.
+        worker._auto_adopt_state['a']['temporary_failures']=4
+        chime=next(c for c in worker.status()['chimes'] if c['key']=='a')
+        self.assertFalse(chime['auto_adoption_retrying']);self.assertTrue(chime['auto_adoption_failed'])
+
+    async def test_access_error_after_temporary_ones_needs_attention(self):
+        worker=self.worker(ManagementError('busy',kind='rate_limit',http_status=429))
+        await self.poll(worker,100)
+        worker.auto_adopter.side_effect=ManagementError('refused',kind='authentication',http_status=403)
+        await self.poll(worker,200)
+        worker._statuses=[{'key':'a'}]
+        chime=worker.status()['chimes'][0]
+        self.assertFalse(chime['auto_adoption_retrying']);self.assertTrue(chime['auto_adoption_failed'])
+
     async def test_permanent_access_errors_keep_bounded_attempts(self):
         worker=self.worker(ManagementError('refused',kind='authentication',http_status=403))
         for now in (100,130,160,190):await self.poll(worker,now)
