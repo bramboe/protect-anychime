@@ -25,7 +25,7 @@ from manual_timing import ManualTiming
 
 ROOT = Path(__file__).resolve().parent
 NATIVE = NativeWorker()
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 DEFAULT_PORT = 48200
 SELECTION_LOCK = NATIVE.selection_lock
 DATA_ROOT = Path(os.environ.get("ANYCHIME_DATA_DIR", "/data"))
@@ -282,7 +282,7 @@ class Handler(BaseHTTPRequestHandler):
             except (SpeakerError,ValueError,OSError) as error:
                 return self.respond(400,{'error':str(error) if isinstance(error,ValueError) else 'Could not save product information.'})
         if route in ("/api/management/prepare", "/api/management/login", "/api/management/forget"):
-            return self.respond(403, {"error": "Manage the Protect account with Change next to the console address in this app."})
+            return self.respond(403, {"error": "Manage the Protect account at the top of this app’s page."})
         if route in ("/api/chimes/remove", "/api/chimes/inspect", "/api/chimes/prepare-adoption", "/api/chimes/test"):
             if self.client_address[0] != "172.30.32.2":
                 return self.respond(403, {"error": "Authenticated Home Assistant ingress required"})
@@ -316,7 +316,7 @@ class Handler(BaseHTTPRequestHandler):
                     operation='test chime' if route.endswith('/test') else 'prepare adoption' if route.endswith('/prepare-adoption') else 'remove chime' if route.endswith('/remove') else 'inspect chimes'
                     print('Protect management failed: '+operation+' ('+error.kind+(', HTTP '+str(error.http_status) if error.http_status else '')+'). No request data or credentials logged.',flush=True)
                     if error.kind=='rate_limit':message='Protect is temporarily limiting requests (HTTP 429). Wait a minute, then try again. No automatic test retry was sent.'
-                    elif error.kind=='authentication':message='Protect refused access. Check the local account permissions with Change next to the console address. Check app logs.'
+                    elif error.kind=='authentication':message='Protect refused access. Check the local account permissions at the top of this app’s page. Check app logs.'
                     elif error.http_status is not None:
                         message='Protect could not complete this request (HTTP '+str(error.http_status)+'). Check app logs. Tests are not retried automatically because playback may already have started.'
                     else:message=str(error)

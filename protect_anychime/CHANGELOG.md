@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+- Make connecting without an account the main path: check the console address and press **Connect** to start using AnyChime right away.
+- Move the local Protect account into a compact, optional **Sign in with a Protect account** section that lists what it adds: automatic adoption, test rings and removal from Protect. Remove a saved account from the same section.
+- Show **Add account** next to the console address when no account is saved, and **Change** when one is.
+
 ## 0.5.0
 
 - Set up the Protect connection in one step at the top of the web interface: console address (detected automatically), local account and automatic adoption, then **Connect**. The rest of the page is unavailable until the console is connected.

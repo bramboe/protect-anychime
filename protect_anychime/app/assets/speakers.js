@@ -106,7 +106,7 @@ async function transfer(entity,target){
 async function removeMember(chime,row){const last=chime.members.length===1;if(last&&!await confirmChimeAction('Remove chime?', 'Remove this speaker and its chime? Any existing doorbell pairing will also be removed.'))return;await mutate('chimes/members',{action:'remove',key:chime.key,entity_id:row.entity_id,confirm_last:last});}
 function openAddMember(key){addTarget=key;const select=$('add-member-choice');select.replaceChildren();const target=chimes.find(c=>c.key===key);const choices=rows.filter(r=>r.available&&!target?.members?.includes(r.entity_id));for(const row of choices){const option=document.createElement('option');option.value=row.entity_id;const owner=chimes.find(c=>c.active&&c.members?.includes(row.entity_id));option.textContent=row.name+(owner?' (in '+owner.name+')':'');select.append(option);}if(!choices.length){const option=document.createElement('option');option.textContent='No other online speakers available';option.disabled=true;select.append(option);}$('add-member-confirm').disabled=!choices.length;$('add-member-dialog').showModal();}
 $('add-member-close').onclick=()=>$('add-member-dialog').close();$('add-member-confirm').onclick=()=>{const entity=$('add-member-choice').value;$('add-member-dialog').close();if(entity)void transfer(entity,addTarget);};
-function openChimeActions(chime,anchor){actionChime=chime;const live=nativeStates.get(chime.key);$('chime-action-title').textContent=chime.name;const configured=live?.protect_configured===true;$('chime-test').hidden=!configured;$('test-volume-control').hidden=!configured;$('test-volume').value='10';$('test-volume-value').textContent='10%';$('chime-test').disabled=mutationBusy||!live?.connected||!live?.adopted||!managementReady||!!chime.migration_hold||!!chime.removal_pending;$('chime-timing').hidden=chime.members.length<2;$('chime-timing').disabled=mutationBusy||!!chime.migration_hold||!!chime.removal_pending;$('chime-remove').disabled=mutationBusy;showMessage('chime-action-help',!managementReady?'Testing requires a local Protect account. Add one with Change at the top of the page. Removing speakers is always available.':!configured?'Configure the doorbell and chime in Protect to enable testing. You can remove it at any stage.':!live?.connected||!live?.adopted?'This chime is offline. Testing becomes available when it reconnects. You can remove it at any stage.':'Test volume applies only to this request. Announcement volume and music restoration depend on the integration.');const dialog=$('chime-actions'),box=anchor.getBoundingClientRect(),scroll={x:scrollX,y:scrollY};menuAnchor=anchor;dialog.style.top=(box.bottom+6+scrollY)+'px';dialog.style.left=(Math.max(12,box.right-280)+scrollX)+'px';if(!dialog.open)dialog.show();window.scrollTo(scroll.x,scroll.y);placeChimeMenu();(configured?$('test-volume'):$('chime-remove')).focus({preventScroll:true});}
+function openChimeActions(chime,anchor){actionChime=chime;const live=nativeStates.get(chime.key);$('chime-action-title').textContent=chime.name;const configured=live?.protect_configured===true;$('chime-test').hidden=!configured;$('test-volume-control').hidden=!configured;$('test-volume').value='10';$('test-volume-value').textContent='10%';$('chime-test').disabled=mutationBusy||!live?.connected||!live?.adopted||!managementReady||!!chime.migration_hold||!!chime.removal_pending;$('chime-timing').hidden=chime.members.length<2;$('chime-timing').disabled=mutationBusy||!!chime.migration_hold||!!chime.removal_pending;$('chime-remove').disabled=mutationBusy;showMessage('chime-action-help',!managementReady?'Test rings need a local Protect account. Choose Add account at the top of the page. Removing speakers is always available.':!configured?'Configure the doorbell and chime in Protect to enable testing. You can remove it at any stage.':!live?.connected||!live?.adopted?'This chime is offline. Testing becomes available when it reconnects. You can remove it at any stage.':'Test volume applies only to this request. Announcement volume and music restoration depend on the integration.');const dialog=$('chime-actions'),box=anchor.getBoundingClientRect(),scroll={x:scrollX,y:scrollY};menuAnchor=anchor;dialog.style.top=(box.bottom+6+scrollY)+'px';dialog.style.left=(Math.max(12,box.right-280)+scrollX)+'px';if(!dialog.open)dialog.show();window.scrollTo(scroll.x,scroll.y);placeChimeMenu();(configured?$('test-volume'):$('chime-remove')).focus({preventScroll:true});}
 // The menu stays in this document and is placed in page coordinates, so it scrolls
 // together with its ⋯ button instead of floating over other chimes.
 function placeChimeMenu(){
@@ -175,43 +175,44 @@ $('product-search').addEventListener('input',renderProducts);
 $('product-close').onclick=()=>$('product-dialog').close();
 $('product-save').onclick=async()=>{if(!productSpeaker)return;$('product-save').disabled=true;showMessage('product-feedback','Saving product information…');try{await api('products/link',{entity_id:productSpeaker.entity_id,product_device_id:$('product-choice').value||null});$('product-dialog').close();await load();}catch(e){showMessage('product-feedback',e.message,true);}finally{$('product-save').disabled=false;}};
 
-/* One-step connection: console, optional local account and automatic adoption. */
+/* One-step connection: console first; a local Protect account is optional. */
 function renderSetup(connection,setup){
 setupState=setup;const required=!connection.trusted;
 document.body.classList.toggle('setup-required',required);
 for(const node of document.querySelectorAll('.summary,.layout'))node.inert=required;
 const name=setup.console_name||connection.controller_ip||'';
-$('protect-address').textContent=name?'Protect · '+name+(setup.account_configured?'':' · no account'):'';
+$('protect-address').textContent=name?'Protect · '+name:'';
 $('protect-address').title=[setup.console_model,setup.console_version?'Protect '+setup.console_version:'',connection.controller_ip].filter(Boolean).join(' · ');
+$('connection-change').textContent=setup.account_configured?'Change':'Add account';
 $('console-line').hidden=required||!name;
 if(!connectionLoaded){fillSetup(connection);connectionLoaded=true;}
 $('setup-cancel').hidden=required;
 $('connection-setup').hidden=!(required||editingConnection);}
-function fillSetup(connection){
+function fillSetup(connection,openAccount=false){
 if(connection)$('console-address').value=connection.controller_ip||'';
 $('protect-user').value=setupState.username||'';$('protect-password').value='';
 $('protect-password').placeholder=setupState.account_configured?'Saved · leave empty to keep':'';
 $('auto-adopt').checked=setupState.account_configured?setupState.auto_adopt===true:true;
-const remove=editingConnection&&setupState.account_configured;
-$('connect-without-account').textContent=remove?'Remove account':'Continue without an account';
-$('no-account-hint').textContent=remove?'Removing the account keeps your chimes. Adopt new chimes yourself in the Protect app; test rings are then unavailable.':'Without an account, adopt new chimes yourself in the Protect app. Test rings are then unavailable.';}
-function setSetupBusy(busy){for(const id of ['connect-protect','connect-without-account','setup-cancel','console-address','protect-user','protect-password','auto-adopt'])$(id).disabled=busy;}
-async function connectProtect(useAccount){
-const address=$('console-address').value.trim(),username=$('protect-user').value.trim(),password=$('protect-password').value;
-const keepPassword=setupState.account_configured&&username===setupState.username;
+$('remove-account').hidden=!setupState.account_configured;
+$('setup-account').open=openAccount||!!setupState.account_configured;}
+function setSetupBusy(busy){for(const id of ['connect-protect','remove-account','setup-cancel','console-address','protect-user','protect-password','auto-adopt'])$(id).disabled=busy;}
+async function connectProtect(removeAccount=false){
+const address=$('console-address').value.trim(),username=removeAccount?'':$('protect-user').value.trim(),password=removeAccount?'':$('protect-password').value;
+const useAccount=!!username,keepPassword=setupState.account_configured&&username===setupState.username;
 if(!address){showMessage('certificate-feedback','Enter the address of your Protect console.',true);$('console-address').focus();return;}
-if(useAccount&&!username){showMessage('certificate-feedback','Enter the username of a local UniFi account.',true);$('protect-user').focus();return;}
-if(useAccount&&!password&&!keepPassword){showMessage('certificate-feedback','Enter the password of the local UniFi account.',true);$('protect-password').focus();return;}
-const removing=!useAccount&&setupState.account_configured;setSetupBusy(true);showMessage('certificate-feedback',useAccount?'Connecting to Protect and signing in…':'Connecting to Protect…');
-try{const d=await api('connection/connect',{controller_ip:address,use_account:useAccount,username:useAccount?username:'',password:useAccount?password:'',auto_adopt:$('auto-adopt').checked});
+if(!useAccount&&password){$('setup-account').open=true;showMessage('certificate-feedback','Enter the username of the local UniFi account, or clear the password to connect without an account.',true);$('protect-user').focus();return;}
+if(useAccount&&!password&&!keepPassword){$('setup-account').open=true;showMessage('certificate-feedback','Enter the password of the local UniFi account.',true);$('protect-password').focus();return;}
+const removing=!useAccount&&setupState.account_configured;
+setSetupBusy(true);showMessage('certificate-feedback',useAccount?'Connecting to Protect and signing in…':'Connecting to Protect…');
+try{const d=await api('connection/connect',{controller_ip:address,use_account:useAccount,username,password:useAccount?password:'',auto_adopt:$('auto-adopt').checked});
 editingConnection=false;$('protect-password').value='';showMessage('certificate-feedback','');
 const name=d.console_name||d.controller_ip;
-feedback(removing&&d.bridge!=='restart_required'?'Protect account removed. Adopt new chimes yourself in the Protect app.':d.bridge==='restart_required'?'Connected to '+name+'. Restart AnyChime from its Home Assistant app page to switch to this console.':'Connected to '+name+'.'+(d.account_configured?(d.auto_adopt?' New chimes are adopted automatically.':' Adopt new chimes in Protect.'):' Adopt new chimes yourself in the Protect app.'),d.bridge==='restart_required',d.bridge!=='restart_required');
+feedback(d.bridge==='restart_required'?'Connected to '+name+'. Restart AnyChime from its Home Assistant app page to switch to this console.':removing?'Protect account removed. Adopt new chimes yourself in the Protect app.':'Connected to '+name+'.'+(d.account_configured?(d.auto_adopt?' New chimes are adopted automatically.':' Adopt new chimes in Protect.'):' Add a speaker to create a chime, then adopt it in the Protect app.'),d.bridge==='restart_required',d.bridge!=='restart_required');
 await status();}
 catch(e){showMessage('certificate-feedback',e.message,true);}finally{setSetupBusy(false);}}
-$('setup-form').onsubmit=event=>{event.preventDefault();void connectProtect(true);};
-$('connect-without-account').onclick=()=>void connectProtect(false);
-$('connection-change').onclick=()=>{editingConnection=true;fillSetup(null);showMessage('certificate-feedback','');$('setup-cancel').hidden=false;$('connection-setup').hidden=false;$('connection-setup').scrollIntoView({block:'nearest'});$('protect-user').focus({preventScroll:true});};
+$('setup-form').onsubmit=event=>{event.preventDefault();void connectProtect();};
+$('remove-account').onclick=()=>void connectProtect(true);
+$('connection-change').onclick=()=>{editingConnection=true;fillSetup(null,!setupState.account_configured);showMessage('certificate-feedback','');$('setup-cancel').hidden=false;$('connection-setup').hidden=false;$('connection-setup').scrollIntoView({block:'nearest'});$('protect-user').focus({preventScroll:true});};
 $('setup-cancel').onclick=()=>{editingConnection=false;showMessage('certificate-feedback','');$('connection-setup').hidden=true;$('connection-change').focus({preventScroll:true});};
 try{viewMode=localStorage.getItem('anychime-speaker-view')||'list';}catch{}
 dialogHost=new AnyChimeDialogHost(document,['confirm-action-dialog'],()=>placeChimeMenu(),menuEvents);

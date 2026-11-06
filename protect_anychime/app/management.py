@@ -267,7 +267,7 @@ class ProtectManagement:
         with self.lock:
             account = dict(self.configured_account or {})
         if not account or account['host'] != host:
-            raise ManagementError('Add a local Protect account in this app: choose Change next to the console address at the top.')
+            raise ManagementError('Add a local Protect account at the top of this app’s page.')
         fingerprint = self._saved_fingerprint(host)
         if fingerprint is None:
             # Same first-use local-console trust model as HA's local integration;
