@@ -1,6 +1,6 @@
 # Protect AnyChime project
 
-Source app version: 0.5.1. Slug: `protect_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
+Source app version: 0.5.2. Slug: `protect_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
 
 ## Chimes and speakers
 
@@ -20,11 +20,11 @@ Verification uses fake HA/Protect request boundaries and synthetic media bytes. 
 
 `audio.py` consumes one-use playback approval, inspects each member independently, filters unavailable/muted members and forms an effective request plan. Platform/group metadata is used only for playback deduplication. Sonos announcements stay individual. Consistent non-Sonos music groups and normal Sonos music playback use a coordinator; incompatible mixed Sonos announcement capability fails before writes. All effective playback requests run in parallel and never call HA grouping services.
 
-`playback.py` translates native Protect volume/track/repeat into the same backend route. It loads manual offsets by HA device ID with entity fallback. Zero volume remains silent. Repeat scheduling remains duration + 50 ms. Original ringtone bytes and media paths remain unchanged; there is no rendered audio path or cache.
+`playback.py` translates native Protect volume/track/repeat into the same backend route. It loads manual offsets and volume levels by HA device ID with entity fallback; `audio.scaled_volume` applies each level to Protect's volume per effective request. Zero volume remains silent. Repeat scheduling remains duration + 50 ms. Original ringtone bytes and media paths remain unchanged; there is no rendered audio path or cache.
 
 `announcement_sync.py` owns a bounded one-second download barrier and a server-side offset of at most 500 ms. Every effective output receives a random member token beneath a random batch token, tied to the original media path. Counts are by member token rather than IP. Responses are held before headers; probes, HEAD and later ranges bypass holding. A shared absolute release epoch avoids accumulating scheduling jitter into another full delay. Unknown tokens cannot choose offsets. Single-output delivery has no barrier or delay. Compact summaries include only counts, arrival spread and release reason.
 
-`manual_timing.py` stores the existing 0–500 ms values in private `latency-delays.json`. The UI exposes Save and an explicit Test at 10%. No editing, saving, loading, migration or refresh operation starts audio. A grouping integration may fan out a single effective request itself, and its outputs cannot then be independently compensated here. Announcement volume is integration-specific.
+`manual_timing.py` stores the existing 0–500 ms values in private `latency-delays.json` and 10–100% volume levels in `speaker-levels.json` (also carried by the migration export). The UI exposes Save and an explicit Test at 10%. No editing, saving, loading, migration or refresh operation starts audio. A grouping integration may fan out a single effective request itself, and its outputs cannot then be independently compensated here. Announcement volume is integration-specific.
 
 Download release timing is not a common acoustic clock. Whether it performs as well as leading digital silence must be checked by the user on real speakers. Keep numeric settings, but retest them after upgrade. The local pre-simplification Git snapshot preserves the previous implementation for source comparison. Removed microphone/timestamp modules and generated-cache logic must not be reintroduced as hidden alternate playback routes.
 

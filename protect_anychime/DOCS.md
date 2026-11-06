@@ -18,9 +18,11 @@ After completed migration, obsolete grouping preferences, microphone profiles, t
 
 The app uses host networking, an ingress/media listener on 48200 and per-virtual-device management forwarding. Network permissions are NET_ADMIN and NET_RAW. Dedicated nftables rules and journals are owned and cleaned up by the app; other applications' rules are not targets. HA OS has been exercised live; Supervised/Debian and different Docker/network backends require their own validation. No source release includes runtime identity, account, certificate or audio material.
 
-## Timing
+## Speaker volume and timing
 
-Timing is available for a chime with at least two configured members. Each member has a 0–500 ms slider and Save. Test requests playback only after an explicit click, at 10% by default. All normal Protect test ownership/adoption checks remain in effect. Editing or saving does not play sound. Saved offsets apply to doorbell rings as well as tests.
+**Speaker settings** is available for every chime. Each member has a volume level of 10–100% (default 100%), stored per HA device in private `speaker-levels.json`. The level scales the volume Protect requests: announcements receive the scaled value in `extra.volume`; normal playback sets each speaker's own `volume_set` level. A request shared by an HA music group, Cast group or Music Assistant group uses one level (its coordinator's when selected, otherwise the first selected member's). A level never silences a speaker on its own; scaled values are at least 1 when Protect's volume is above 0.
+
+Timing is available for a chime with at least two configured members. Each member has a 0–500 ms slider. Volume and delay are validated together and saved with one Save; a rejected value saves neither. Test requests playback only after an explicit click, at 10% by default. All normal Protect test ownership/adoption checks remain in effect. Editing or saving does not play sound. Saved offsets apply to doorbell rings as well as tests.
 
 Manual values are private in `/data/latency-delays.json`, keyed by HA device ID, falling back to `entity_id` for players without a device. Existing values survive upgrade and export/import. Offline members retain their saved values. Two entities for the same HA device share its stored offset. A single effective playback target ignores offsets, even if more than one configured member collapses onto that target.
 

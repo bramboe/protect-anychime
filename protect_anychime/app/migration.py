@@ -11,7 +11,7 @@ import zipfile
 
 MAX_ARCHIVE=128*1024*1024
 MAX_TOTAL=256*1024*1024
-ROOT_FILES={'managed-settings.json','speakers.json','chimes.json','product-links.json','latency-delays.json','chime-schema.json','protect-management-trust.json'}
+ROOT_FILES={'managed-settings.json','speakers.json','chimes.json','product-links.json','latency-delays.json','speaker-levels.json','chime-schema.json','protect-management-trust.json'}
 DIRECTORIES={'native','identities','ringtones','network'}
 SETTINGS={'native_ip','controller_ip','controller_fingerprint','controller_certificate','unifi_compatibility_profile'}
 # The Protect account is never exported; an import keeps the one already set up here.

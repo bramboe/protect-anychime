@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2
+
+- Set a volume per speaker, from 10 to 100% of the volume Protect requests, so louder speaker models no longer drown out quieter ones. Announcements and normal playback both use each speaker's own level; a speaker never becomes silent on its own.
+- Rename the chime menu's **Timing** to **Speaker settings** and show it for every chime. Chimes with several speakers also keep their delay per speaker. Volume and delay are saved together and included in migration exports.
+
 ## 0.5.1
 
 - Make connecting without an account the main path: check the console address and press **Connect** to start using AnyChime right away.

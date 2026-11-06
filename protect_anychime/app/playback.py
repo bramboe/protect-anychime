@@ -5,7 +5,7 @@ import math
 import subprocess
 import threading
 from audio import SpeakerBackend, SpeakerError
-from manual_timing import ManualTiming
+from manual_timing import ManualTiming, SpeakerLevels, LEVEL_DEFAULT
 
 
 def duration(path):
@@ -76,8 +76,11 @@ class TrackPlayer:
             url=f"{self.media_base}{path}"
             delays=ManualTiming(self.data_dir).read() if self.data_dir else {}
             offsets={e:delays.get(devices.get(e) or e,0) for e in members}
+            saved_levels=SpeakerLevels(self.data_dir).read() if self.data_dir else {}
+            levels={e:saved_levels.get(devices.get(e) or e,LEVEL_DEFAULT) for e in members}
             backend=self.backend_factory({'speaker_entity':entity,'audio_url':url,
-                'group_members':list(members),'member_platforms':platforms,'member_delays':offsets},allow_playback=True)
+                'group_members':list(members),'member_platforms':platforms,'member_delays':offsets,
+                'member_levels':levels},allow_playback=True)
             for index in range(repeat):
                 if self.stop_event.is_set():
                     break

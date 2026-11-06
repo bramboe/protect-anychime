@@ -21,16 +21,17 @@ import mimetypes
 from runtime import NativeWorker
 from audio import SpeakerBackend, SpeakerError
 from announcement_sync import ALIGNMENT
-from manual_timing import ManualTiming
+from manual_timing import ManualTiming, SpeakerLevels
 
 ROOT = Path(__file__).resolve().parent
 NATIVE = NativeWorker()
-VERSION = "0.5.1"
+VERSION = "0.5.2"
 DEFAULT_PORT = 48200
 SELECTION_LOCK = NATIVE.selection_lock
 DATA_ROOT = Path(os.environ.get("ANYCHIME_DATA_DIR", "/data"))
 IMAGES = artwork.ImageCache(DATA_ROOT / "product-images")
 MANUAL_TIMING=ManualTiming(DATA_ROOT)
+SPEAKER_LEVELS=SpeakerLevels(DATA_ROOT)
 CERTIFICATES = connection.CertificateManager()
 MANAGEMENT = management.ProtectManagement(DATA_ROOT / "protect-management.json")
 
@@ -258,10 +259,19 @@ class Handler(BaseHTTPRequestHandler):
                     entry=next((e for e in NATIVE.registry.snapshot() if e['key']==body.get('key') and e['active']),None) if NATIVE.registry else None
                     if not entry or entry.get("migration_hold") or entry.get("removal_pending"):raise ValueError('Finish chime setup first.')
                     rows=speakers.discover();description=MANUAL_TIMING.describe(entry,rows)
-                    values=body.get('delays')
-                    if not description['supported'] or not isinstance(values,dict) or set(values)!={m['device_id'] for m in description['members']}:
+                    devices={m['device_id'] for m in description['members']}
+                    delays=body.get('delays');levels=body.get('levels')
+                    if delays is None and levels is None:raise ValueError('Nothing to save.')
+                    if delays is not None and (not description['supported'] or not isinstance(delays,dict) or set(delays)!=devices):
                         raise ValueError('The speaker membership changed or this route cannot adjust individual timing.')
-                    MANUAL_TIMING.save(values);NATIVE.refresh_groups(rows)
+                    if levels is not None and (not isinstance(levels,dict) or set(levels)!=devices):
+                        raise ValueError('The speaker membership changed. Reopen Speaker settings.')
+                    # Validate both before saving either, so a rejected value never half-saves.
+                    if delays is not None:MANUAL_TIMING.validate(delays)
+                    if levels is not None:SPEAKER_LEVELS.validate(levels)
+                    if delays is not None:MANUAL_TIMING.save(delays)
+                    if levels is not None:SPEAKER_LEVELS.save(levels)
+                    NATIVE.refresh_groups(rows)
                     return self.respond(200,{'saved':True,'audio_played':False})
             except (ValueError,OSError,SpeakerError) as error:return self.respond(400,{'error':str(error)})
 

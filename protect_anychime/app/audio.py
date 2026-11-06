@@ -62,6 +62,16 @@ def _supervisor_request(method, path, body=None):
         raise SpeakerError("Home Assistant is unreachable or returned an invalid response.") from None
 
 
+def scaled_volume(volume, level):
+    """Protect's volume scaled by a speaker's level (percent).
+
+    Never silences a speaker on its own: only Protect volume 0 is silent.
+    """
+    if volume <= 0:
+        return 0
+    return max(1, min(100, int(volume * level / 100 + 0.5)))
+
+
 def _volume(value):
     if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 100:
         raise ValueError("Speaker volume must be between 0 and 100.")
@@ -101,6 +111,9 @@ class SpeakerBackend:
         self._delays=options.get('member_delays') or {}
         if not isinstance(self._delays,dict) or any(e not in self._members or type(v) is not int or not 0<=v<=500 for e,v in self._delays.items()):
             raise ValueError('Invalid speaker delays.')
+        self._levels=options.get('member_levels') or {}
+        if not isinstance(self._levels,dict) or any(e not in self._members or type(v) is not int or not 10<=v<=100 for e,v in self._levels.items()):
+            raise ValueError('Invalid speaker volume levels.')
         self._enabled = allow_playback is True
         self._request = requester or _supervisor_request
         self._clock = clock or time.monotonic
@@ -230,13 +243,18 @@ class SpeakerBackend:
                 volume_targets=[]
                 volume_players=[q for q in active if q['entity_id'] in group] if len(group)>1 else [player]
                 if player not in volume_players:volume_players.append(player)
+                # A shared playback target uses its coordinator's level, else the first selected member's.
+                level=self._levels.get(entity,self._levels.get(origin,100))
                 if not announce:
                     for volume_player in volume_players:
+                        # Normal playback sets each speaker's own volume, so each keeps its level.
+                        own=scaled_volume(volume,self._levels.get(volume_player['entity_id'],level))
                         features=volume_player['supported_features']
-                        if features is None or features&VOLUME_SET:volume_targets.append(volume_player['entity_id'])
-                        elif volume_player['volume_level'] is None or volume_player['volume_level']>volume/100:
+                        if features is None or features&VOLUME_SET:volume_targets.append((volume_player['entity_id'],own))
+                        elif volume_player['volume_level'] is None or volume_player['volume_level']>own/100:
                             raise SpeakerError('A selected speaker cannot set its volume safely. No audio was started.')
                 targets.append({'entity':entity,'members':contributors,'announce':announce,'volume_targets':volume_targets,
+                    'volume':scaled_volume(volume,level),
                     'offset':self._delays.get(entity,self._delays.get(origin,0))})
             except Exception:failed(contributors,'preflight')
         if not targets:
@@ -249,11 +267,12 @@ class SpeakerBackend:
         self.last_alignment_token=token
         def send(target):
             entity=target['entity']
-            if target['volume_targets']:
-                volumes=target['volume_targets']
-                self._request('POST','/services/media_player/volume_set',{'entity_id':volumes if len(volumes)>1 else volumes[0],'volume_level':volume/100})
+            levels={}
+            for volume_entity,own in target['volume_targets']:levels.setdefault(own,[]).append(volume_entity)
+            for own,entities in levels.items():
+                self._request('POST','/services/media_player/volume_set',{'entity_id':entities if len(entities)>1 else entities[0],'volume_level':own/100})
             body={'entity_id':entity,'media_content_type':'music','media_content_id':urls[entity]}
-            if target['announce']:body.update(announce=True,extra={'volume':volume})
+            if target['announce']:body.update(announce=True,extra={'volume':target['volume']})
             return self._request('POST','/services/media_player/play_media',body)
         accepted=[]
         with ThreadPoolExecutor(max_workers=len(targets)) as pool:

@@ -24,9 +24,11 @@ Back up and restore the app through Home Assistant. Include this app to retain f
 
 Upgrading preserves each saved chime's key, identity and current members. An interrupted older grouping operation is held for explicit review instead of silently deleting or recreating devices. Follow the migration message, remove affected chimes through the confirmed flow and finish migration before adding their speakers again. Unrelated identities remain unchanged.
 
-## Timing
+## Speaker volume and timing
 
-Open a multi-member chime's menu → **Timing**. Increase **Delay (ms)** for a speaker that sounds early and leave the latest speaker at zero. Choose 0–500 ms, press **Save**, then explicitly press **Test at 10%** to compare by ear. Saved delays also apply to real doorbell rings; Protect's saved volume is unchanged. This works on a local HTTP connection without a microphone, HTTPS setup or a Cloud subscription.
+Open a chime's menu → **Speaker settings**. Each speaker has a **Volume** from 10 to 100%: the volume it plays at is Protect's volume times this percentage. Leave the quietest speaker at 100% and lower louder models, so the chime sounds even. With Protect at 100, a speaker at 60% plays at 60. A speaker never becomes silent on its own; only Protect volume 0 is silent.
+
+A chime with two or more speakers also shows **Delay (ms)**: increase it for a speaker that sounds early and leave the latest speaker at zero. Choose 0–500 ms, press **Save**, then explicitly press **Test at 10%** to compare by ear (tests need a local Protect account). Saved volumes and delays also apply to real doorbell rings; Protect's saved volume is unchanged. This works on a local HTTP connection without a microphone, HTTPS setup or a Cloud subscription.
 
 For each ring, AnyChime skips offline, standby and muted members, then sends effective playback requests in parallel. Players advertising announcement support receive `announce: true`; others use normal volume/playback services. Consistent non-Sonos music groups are deduplicated to their coordinator. Sonos announcements address individual speakers; normal Sonos group playback still uses its coordinator. A mixed Sonos music group with incompatible announcement support is refused before audio rather than producing overlapping playback.
 
