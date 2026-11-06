@@ -26,8 +26,8 @@ function render(){
  const shown=chimes.filter(c=>(c.active||c.removal_pending||c.migration_hold)&&!c.removal_requested);
  for(const key of expandedChimes)if(!shown.some(c=>c.key===key))expandedChimes.delete(key);
  const h=document.createElement('h3');h.textContent='Chimes in Protect · '+shown.length;area.append(h);
- const pending=chimes.filter(c=>c.removal_requested&&c.removal_pending).length;
- if(pending){const note=document.createElement('p');note.className='pending-cleanup warning';note.setAttribute('role','status');note.textContent=pending+' chime'+(pending===1?' is':'s are')+' removed here. Protect cleanup is pending. '+(managementReady?'Retrying automatically.':'Configure a local Protect account in the HA app to finish cleanup.');area.append(note);}
+ const pendingChimes=chimes.filter(c=>c.removal_requested&&c.removal_pending),pending=pendingChimes.length;
+ if(pending){const note=document.createElement('div');note.className='pending-cleanup warning';note.setAttribute('role','status');const text=document.createElement('p');text.textContent=pending+' chime'+(pending===1?' is':'s are')+' removed here. '+(managementReady?'Protect cleanup is pending; retrying automatically.':'Remove '+(pending===1?'it':'them')+' in the Protect app too (shown as offline), then confirm below.');note.append(text);if(!managementReady)for(const chime of pendingChimes){const row=document.createElement('div');row.className='pending-cleanup-row';const name=document.createElement('span');name.textContent=chime.name;const button=document.createElement('button');button.type='button';button.className='secondary';button.textContent='I removed it in Protect';button.disabled=mutationBusy;button.onclick=()=>void confirmProtectCleanup(chime,button);row.append(name,button);note.append(row);}area.append(note);}
  for(const chime of shown){
   const members=chime.members||[chime.entity_id];
   if(query&&!members.some(e=>(lookup.get(e)?.name||e).toLocaleLowerCase().includes(query))&&!chime.name.toLocaleLowerCase().includes(query))continue;
@@ -74,6 +74,11 @@ function resetChimeExpansion(){protectEventFeed.reset();expandedChimes.clear();i
 window.addEventListener('pageshow',resetChimeExpansion);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')resetChimeExpansion();else render();});
 
+async function confirmProtectCleanup(chime,button){
+ const accepted=await confirmChimeAction('Removed in Protect?','Confirm that '+chime.name+' no longer appears in the Protect app. AnyChime then deletes this chime\u2019s saved identity and ringtones. Your Home Assistant speakers are not changed.','Confirm removal');
+ if(!accepted)return;button.disabled=true;feedback('Finishing cleanup…');
+ try{await api('chimes/cleanup-confirmed',{key:chime.key,confirmed:true});feedback(chime.name+' is fully removed.',false,true);await status();}
+ catch(e){feedback(e.message,true);button.disabled=false;}}
 let confirmationResolve=null;
 function confirmChimeAction(title,message,label='Remove chime'){
  if(confirmationResolve)return Promise.resolve(false);

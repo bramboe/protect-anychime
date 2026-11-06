@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.4
+
+- Finish removing a chime without a Protect account. The pending-cleanup notice now asks you to remove the offline chime in the Protect app too and offers **I removed it in Protect** per chime. After confirming, AnyChime erases that chime's saved identity and ringtones and the notice disappears. No Protect request is sent.
+- With an account, cleanup stays automatic; the notice no longer points to the Home Assistant Configuration tab.
+
 ## 0.5.3
 
 - Without a Protect account, stop showing the orange "Check chime configuration in Protect", which could never update. An adopted, connected chime now shows green **Connected to Protect** with a static hint to pair it with a doorbell in the Protect app, and **Active as chime** with the time of the last ring once Protect has rung it.

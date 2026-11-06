@@ -25,7 +25,7 @@ from manual_timing import ManualTiming, SpeakerLevels
 
 ROOT = Path(__file__).resolve().parent
 NATIVE = NativeWorker()
-VERSION = "0.5.3"
+VERSION = "0.5.4"
 DEFAULT_PORT = 48200
 SELECTION_LOCK = NATIVE.selection_lock
 DATA_ROOT = Path(os.environ.get("ANYCHIME_DATA_DIR", "/data"))
@@ -293,6 +293,31 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(400,{'error':str(error) if isinstance(error,ValueError) else 'Could not save product information.'})
         if route in ("/api/management/prepare", "/api/management/login", "/api/management/forget"):
             return self.respond(403, {"error": "Manage the Protect account at the top of this app’s page."})
+        if route == "/api/chimes/cleanup-confirmed":
+            # Without a Protect account the app cannot delete or observe the deletion;
+            # the user confirms they removed the offline chime in the Protect app.
+            if self.client_address[0] != "172.30.32.2":
+                return self.respond(403, {"error": "Authenticated Home Assistant ingress required"})
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 1024:
+                    raise ValueError("Invalid cleanup request.")
+                payload = json.loads(self.rfile.read(length))
+                key = payload.get("key") if isinstance(payload, dict) else None
+                if (not isinstance(payload, dict) or payload.get("confirmed") is not True
+                        or not isinstance(key, str) or not re.fullmatch(r"primary|[a-f0-9]{24}", key)):
+                    raise ValueError("Confirm that this chime was removed in Protect.")
+                with SELECTION_LOCK:
+                    entry = next((e for e in NATIVE.registry.snapshot() if e['key'] == key), None) if NATIVE.registry else None
+                    if not entry or not (entry.get('removal_requested') and entry.get('removal_pending')):
+                        raise ValueError("This chime is not waiting for Protect cleanup.")
+                    NATIVE.remove_from_protect(key)
+                print("Protect cleanup confirmed in the app; the saved chime identity is erased. No Protect request was sent.", flush=True)
+                return self.respond(200, {"cleanup_confirmed": True, "audio_played": False})
+            except ValueError as error:
+                return self.respond(400, {"error": str(error)})
+            except OSError:
+                return self.respond(500, {"error": "App storage could not be updated. Check the app logs."})
         if route in ("/api/chimes/remove", "/api/chimes/inspect", "/api/chimes/prepare-adoption", "/api/chimes/test"):
             if self.client_address[0] != "172.30.32.2":
                 return self.respond(403, {"error": "Authenticated Home Assistant ingress required"})
