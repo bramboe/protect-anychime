@@ -14,16 +14,6 @@ The repository root contains `repository.yaml`; the installable app lives in [`u
 
 See the [app guide](unifi_anychime/README.md), [configuration and behavior](unifi_anychime/DOCS.md), [project architecture](unifi_anychime/PROJECT.md), [release notes](unifi_anychime/CHANGELOG.md) and [security model](docs/SECURITY.md).
 
-## Development
-
-```sh
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s unifi_anychime/app -p 'test_*.py'
-python3 tools/check_release.py
-node tools/test_chime_status.js
-```
-
-Build containers with `unifi_anychime/` as their build context. Never commit HA runtime data, credentials, certificates, device identities or cached recordings. [Publication notes](docs/PUBLICATION.md) describe the release boundary.
-
 ## Support
 
 If this project is useful to you, consider sponsoring my work 💙
