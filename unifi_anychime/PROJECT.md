@@ -1,6 +1,6 @@
 # Protect AnyChime project
 
-Source app version: 0.4.2. Slug: `unifi_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
+Source app version: 0.4.4. Slug: `unifi_anychime`. UI, source and documentation are English. Native Protect adoption, identity, management and ringtone transport are preserved. There are no bundled proprietary ringtones or installation-specific certificates.
 
 ## Chimes and speakers
 
@@ -33,3 +33,9 @@ Download release timing is not a common acoustic clock. Whether it performs as w
 A failed state lookup, volume request or playback request affects only its effective output. Independent successful outputs continue their remaining repetitions. Failed members are excluded for the remainder of that ring, without retry or fallback playback; a new ring can try them again. A failed shared coordinator excludes the selected members represented by that request. Status reports `partial` when some outputs succeeded, with per-member outcomes and accepted-request counts. HA acceptance does not prove audible playback.
 
 All interface and administrative API requests require the actual Supervisor ingress peer, including read-only status and discovery. Loopback and forwarded-address headers cannot authorize access. Speaker media downloads remain intentionally separate from ingress authorization. The enforced AppArmor policy limits file writes and executable paths while retaining the network capabilities needed for virtual chimes. See [security details](../docs/SECURITY.md).
+
+## Chime setup status
+
+With automatic adoption enabled and a local Protect account configured, new chimes show blue **Adopting in Protect**. Once adopted and connected, an unpaired chime shows orange **Configure chime in Protect**. Pair it with a doorbell in Protect and choose its sound, volume and repetitions there. Green **Active as chime** requires a confirmed doorbell pairing and a live chime connection; default sound/volume settings count as configured. This status does not prove acoustic playback.
+
+Pairing is read from Protect for verified installation-owned identities approximately every ten seconds, with up to another interface refresh interval before the label changes. Missing fields, account access problems and failed refreshes show an unknown/unavailable status rather than assuming the chime is active. No doorbell identifiers or settings are added to the UI. Automatic adoption disabled keeps the orange **Adopt chime in Protect** instruction. Offline, migration and removal states take precedence.

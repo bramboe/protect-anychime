@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.4
+
+- Allow the canonical `/proc/<pid>/net/` read path in AppArmor so new chimes can discover the network route; retain enforcement and the same capabilities. Report network setup problems in orange and log their reason once per change.
+- Install the corrected profile through a versioned HA update; rebuilding alone does not reload the AppArmor profile.
+
+## 0.4.3
+
+- Use orange consistently for warnings and errors, including dialog feedback. Record adoption/configuration problems in app logs before referring users there.
+
+- Show per-chime setup progress: blue “Adopting in Protect”, orange “Configure chime in Protect”, then green “Active as chime” only after Protect confirms a doorbell pairing and the chime is connected.
+- Read configuration for verified local chimes every ten seconds without changing adoption, pairing, sound, volume or identities. Missing or failed observations do not imply a configured chime.
+- Keep manual adoption instructions when automatic adoption is disabled; show account, retry and offline problems separately.
+
 ## 0.4.2
 
 - Continue repetitions on successful outputs when another speaker rejects a state, volume or playback request. Report partial outcomes and do not retry failed members within the same ring.

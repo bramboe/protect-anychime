@@ -56,6 +56,8 @@ profile unifi_anychime flags=(attach_disconnected,mediate_deleted) {
   /proc/self/** r,
   /proc/thread-self/** r,
   /proc/net/** r,
+  # /proc/net resolves through the current PID on Linux.
+  /proc/[0-9]*/net/** r,
   /proc/sys/net/** r,
   /proc/sys/crypto/** r,
   /sys/ r,

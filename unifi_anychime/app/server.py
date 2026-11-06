@@ -24,7 +24,7 @@ from manual_timing import ManualTiming
 
 ROOT = Path(__file__).resolve().parent
 NATIVE = NativeWorker()
-VERSION = "0.4.2"
+VERSION = "0.4.4"
 DEFAULT_PORT = 48200
 SELECTION_LOCK = NATIVE.selection_lock
 DATA_ROOT = Path(os.environ.get("ANYCHIME_DATA_DIR", "/data"))
@@ -47,6 +47,12 @@ def load_options():
     return options
 
 
+
+def check_chime_configuration():
+    options=load_options()
+    return MANAGEMENT.chime_configuration(options.get('controller_ip',''),NATIVE)
+
+NATIVE.configuration_checker=check_chime_configuration
 
 def automatically_adopt(key):
     if not NATIVE.selection_lock.acquire(blocking=False):return {'retry_later':True}
@@ -93,6 +99,10 @@ class Handler(BaseHTTPRequestHandler):
         return self.client_address[0] == "172.30.32.2"
 
     def respond(self, status, content, kind="application/json"):
+        if status >= 500:
+            route=urlsplit(getattr(self,'path','')).path
+            route=route if re.fullmatch(r'/api/[a-z/]+',route) else 'web interface'
+            print(f'App request failed: {route} returned HTTP {status}. No request data or credentials logged.',flush=True)
         if isinstance(content, dict):
             content = json.dumps(content, allow_nan=False).encode()
         self.send_response(status)
@@ -174,7 +184,7 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/":
             return self.respond(200, (ROOT / "index.html").read_bytes(),
                                 "text/html; charset=utf-8")
-        if route in ('/assets/timing.js','/assets/speakers.js'):
+        if route in ('/assets/timing.js','/assets/speakers.js','/assets/chime-status.js'):
             return self.respond(200,(ROOT/'assets'/route.rsplit('/',1)[1]).read_bytes(),'application/javascript')
         if route == "/assets/sortable.min.js":
             return self.respond(200,(ROOT/'assets'/'sortable.min.js').read_bytes(),'application/javascript')
@@ -212,7 +222,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(200, connection.public_status(load_options()))
         if route == "/api/status":
             options = load_options()
-            return self.respond(200, {"version": VERSION, "build": "hardened1",
+            return self.respond(200, {"version": VERSION, "build": "lifecycle1",
                 "mode": "protect_controlled", "native": NATIVE.status(),
                 "connection": connection.public_status(options),
                 "management": MANAGEMENT.status(options.get('controller_ip','')),
@@ -414,7 +424,7 @@ def run_server():
         options = MANAGEMENT.migrate_to_configuration(options, configuration.self_options)
         MANAGEMENT.configure(options)
         NATIVE.start(options)
-        print(f"Protect AnyChime {VERSION} (hardened1): web interface on {port}; playback controlled by Protect.", flush=True)
+        print(f"Protect AnyChime {VERSION} (lifecycle1): web interface on {port}; playback controlled by Protect.", flush=True)
         server.serve_forever()
     finally:
         try:

@@ -1,0 +1,28 @@
+/* No browser, network, credentials or audio: pure lifecycle labels and colors. */
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict'), path = require('node:path');
+const sandbox = {};
+vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../unifi_anychime/app/assets/chime-status.js'), 'utf8'), sandbox);
+const chime = {}, context = {autoAdoptEnabled: true, managementReady: true};
+const check = (live, label, tone, c=context, entry=chime) => {
+  const actual=sandbox.AnyChimeStatus(entry, live, c);
+  assert.equal(actual.label,label);assert.equal(actual.tone,tone);
+};
+check(undefined,'Adopting in Protect','info');
+check({state:'awaiting_adoption',adopted:false},'Adopting in Protect','info');
+const connected={state:'connected',adopted:true,connected:true};
+check({...connected,protect_configured:false},'Configure chime in Protect','warning');
+check({...connected,protect_configured:true},'Active as chime','success');
+check({...connected,protect_configured:null},'Checking configuration in Protect','info');
+check({...connected,protect_configured:true,configuration_check_failed:true},'Protect configuration check unavailable. Check app logs.','warning');
+check({...connected,state:'offline',protect_configured:true},'Offline','warning');
+check({...connected,connected:false},'Reconnecting to Protect','warning');
+check({state:'awaiting_adoption',adopted:false},'Adopt chime in Protect','warning',{...context,autoAdoptEnabled:false});
+check(undefined,'Configure Protect account to adopt automatically','warning',{...context,managementReady:false});
+check({state:'awaiting_adoption',auto_adoption_failed:true},'Automatic adoption needs attention. Check app logs.','warning');
+check({state:'awaiting_adoption',auto_adoption_exhausted:true},'Automatic adoption needs attention. Check app logs.','warning');
+check({...connected,protect_configured:true},'Migration needs review','warning',context,{migration_hold:true});
+check({...connected,protect_configured:true},'Removal not confirmed','warning',context,{removal_pending:true});
+check({state:'waiting_dhcp'},'Preparing chime','info');
+check({state:'permission_required'},'Network permissions need attention. Check app logs.','warning');
+check({state:'error'},'Setup needs attention. Check app logs.','warning');
+console.log('17 chime lifecycle checks passed. No audio or network requests.');

@@ -34,6 +34,11 @@ class NativeWorker:
         self._discovery=[]
         self.diagnostics={}
         self.loop=None
+        self.configuration_checker=None
+        self._configuration_state={}
+        self._configuration_after=0
+        self._configuration_failed=False
+        self._network_issues={}
         self.auto_adopter=None
         self._auto_adopt_state={}
         self.adoption_checker=None
@@ -45,6 +50,14 @@ class NativeWorker:
     def status(self):
         with self.lock:
             chimes=copy.deepcopy(self._statuses)
+            for chime in chimes:
+                observed=self._configuration_state.get(chime['key'],{})
+                if observed.get('_device_id')==chime.get('device_id'):
+                    chime.update({k:v for k,v in observed.items() if k!='_device_id'})
+                chime['configuration_check_failed']=self._configuration_failed
+                adoption=self._auto_adopt_state.get(chime['key'],{})
+                chime['auto_adoption_failed']=bool(adoption.get('error'))
+                chime['auto_adoption_exhausted']=adoption.get('attempts',0)>=3
             connected=sum(c.get('connected',False) for c in chimes)
             return {'auto_adoption_error':any(v.get('error') for v in self._auto_adopt_state.values()),'auto_adopt_enabled':self.options.get('auto_adopt_chimes') is True,'enabled':bool(self.thread and not self.stop_event.is_set()),
                     'connected':bool(connected),'connected_count':connected,
@@ -285,6 +298,7 @@ class NativeWorker:
                 await self._auto_adopt_new_chimes()
                 await self._repair_stale_adoptions()
                 await self._sync_names()
+                await self._check_configuration()
                 await asyncio.sleep(1)
             udp.join(timeout=2)
         except Exception as error:
@@ -302,6 +316,32 @@ class NativeWorker:
                 self._discovery=[]
                 self._statuses=[{**item,"connected":False,"state":"stopped"} for item in self._statuses]
 
+    def _record_network_state(self, key, net):
+        if net['state'] not in ('permission_required','error'):
+            self._network_issues.pop(key,None)
+            return
+        reason=' '.join(str(net.get('reason','Network setup failed.')).split())[:240]
+        issue=(net['state'],reason)
+        if self._network_issues.get(key)!=issue:
+            print('Chime network setup needs attention ('+net['state']+'): '+reason,flush=True)
+            self._network_issues[key]=issue
+
+    async def _check_configuration(self):
+        if self.configuration_checker is None or time.monotonic()<self._configuration_after:return
+        self._configuration_after=time.monotonic()+10
+        try:
+            result=await asyncio.to_thread(self.configuration_checker)
+            with self.lock:
+                self._configuration_state=result
+                self._configuration_failed=False
+        except Exception as error:
+            if not self._configuration_failed:
+                print('Protect configuration check failed ('+type(error).__name__+'). Check the local Protect account, console access and certificate trust. Retrying automatically.',flush=True)
+            # Never keep showing an old green pairing after a failed refresh.
+            with self.lock:
+                self._configuration_state={}
+                self._configuration_failed=True
+
     async def _auto_adopt_new_chimes(self):
         if self.options.get('auto_adopt_chimes') is not True or self.auto_adopter is None:return
         self._auto_adopt_state={k:v for k,v in self._auto_adopt_state.items() if k in self.nodes}
@@ -316,7 +356,9 @@ class NativeWorker:
             state['last']=now;self._auto_adopt_state[key]=state
             try:
                 result=await asyncio.to_thread(self.auto_adopter,key)
-                if not result.get('retry_later'):state['attempts']+=1
+                if not result.get('retry_later'):
+                    state['attempts']+=1;state.pop('error',None)
+                    if state['attempts']==3:print('Automatic chime adoption is not confirmed after three attempts. Check adoption and account permissions in Protect.',flush=True)
             except Exception:
                 state['attempts']+=1;state['error']=True
                 print('Automatic chime adoption unavailable; configure or adopt the chime in Protect.',flush=True)
@@ -385,6 +427,7 @@ class NativeWorker:
                 identity.initialize_identity()
                 self._network_keys.add(key)
                 net=await asyncio.to_thread(self.network.ensure,key,identity.state['mac'])
+                self._record_network_state(key,net)
                 address=net.get('ip','')
                 existing=self.nodes.get(key)
                 if existing and (net['state']!='ready' or existing['ip']!=address):

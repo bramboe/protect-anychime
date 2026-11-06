@@ -19,6 +19,7 @@ See the [app guide](unifi_anychime/README.md), [configuration and behavior](unif
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s unifi_anychime/app -p 'test_*.py'
 python3 tools/check_release.py
+node tools/test_chime_status.js
 ```
 
 Build containers with `unifi_anychime/` as their build context. Never commit HA runtime data, credentials, certificates, device identities or cached recordings. [Publication notes](docs/PUBLICATION.md) describe the release boundary.

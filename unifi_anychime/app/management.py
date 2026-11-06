@@ -543,6 +543,46 @@ class ProtectManagement:
                 return found
         return {'chimes':self._run(inspect()),'audio_played':False}
 
+    def chime_configuration(self, host, worker):
+        """Read pairing state for verified local identities; never change Protect."""
+        if not self.status(host).get('ready'):return {}
+        entries=worker.registry.snapshot() if worker.registry is not None else []
+        targets={}
+        for entry in entries:
+            if not entry.get('active') or entry.get('removal_pending') or entry.get('migration_hold'):continue
+            try:targets[entry['key']]=worker.removal_identity(entry['key'])
+            except (ValueError,OSError):continue
+        if not targets:return {}
+        if self.configuration_mode:account=self._configured_session_account(host)
+        else:
+            with self.lock:account=self._read()
+        if not account or account['host']!=host:return {}
+        async def inspect():
+            async with self.client_factory(account) as client:
+                devices=await client.chimes();result={}
+                for key,identity in targets.items():
+                    matches=[]
+                    for device in devices:
+                        try:
+                            if _mac(device.get('mac',''))==identity['mac']:matches.append(device)
+                        except ManagementError:continue
+                    if len(matches)!=1:continue
+                    remote=matches[0]
+                    if remote.get('type')!='UP Chime PoE' or remote.get('anonymousDeviceId') not in (None,identity['device_id']):continue
+                    configured=None
+                    cameras=remote.get('cameraIds')
+                    rings=remote.get('ringSettings')
+                    # Positive evidence wins; malformed/missing fields stay unknown.
+                    valid_id=lambda value:isinstance(value,str) and re.fullmatch('[0-9a-f]{24}',value) is not None
+                    if isinstance(cameras,list) and all(valid_id(v) for v in cameras):configured=bool(cameras)
+                    if isinstance(rings,list) and all(isinstance(v,dict) for v in rings):
+                        if any(valid_id(v.get('cameraId')) for v in rings):configured=True
+                        elif not rings and configured is None:configured=False
+                    result[key]={'_device_id':identity['device_id'],'protect_adopted':remote.get('isAdopted') is True,
+                        'protect_adopting':remote.get('isAdopting') is True,'protect_configured':configured}
+                return result
+        return self._run(asyncio.wait_for(inspect(),8))
+
     def sync_names(self, host, keys, worker):
         """Replace generic Protect names only for verified active local identities."""
         entries={e['key']:e for e in worker.registry.snapshot() if e['active']}
