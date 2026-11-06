@@ -1,7 +1,12 @@
 # Artwork sources
 
-The app is an independent project. Artwork remains the property
-of its respective manufacturer. No generated chime icon is shipped.
+The app is an independent community project, not affiliated with or endorsed
+by Ubiquiti Inc. UniFi, UniFi Protect and Ubiquiti, their logos, icons, product
+images and catalogue data are trademarks or other intellectual property of
+Ubiquiti Inc. and remain its property. They are used unmodified and only to
+identify compatible products. No rights to them are claimed, and the project's
+MIT license does not cover them. Rights holders can ask for removal through
+GitHub; the material will be removed promptly. No generated chime icon is shipped.
 
 Official PoE Smart Chime icon, used without modification:
 

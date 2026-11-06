@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.9
+
+- Add a clear disclaimer: Protect AnyChime is an independent community project, not affiliated with or endorsed by Ubiquiti Inc.; UniFi, UniFi Protect, Ubiquiti and their logos, icons and product images are Ubiquiti's trademarks or other intellectual property, used only to identify compatible products. Shown in the README, the app's Home Assistant page, the artwork notes and the footer of the web interface.
+
 ## 0.5.8
 
 - Hide **Drop a speaker here to create a new chime** when no online, unassigned speaker is left. It still appears while you drag or keyboard-move a chime member, so a member can still become a chime of its own.
