@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.12
+
+- Attach the chime menu to its ⋯ button so it scrolls with the page instead of staying in place over other chimes. It opens below the button, or above it when there is not enough room. Outside clicks, Escape and slider drags behave as before; removal confirmations still appear centred over Home Assistant.
+
 ## 0.4.11
 
 - Explain after creating a chime that Protect discovery can take about a minute. Keep guidance visible while preparing or awaiting adoption, and omit it when adding a member to an existing chime.

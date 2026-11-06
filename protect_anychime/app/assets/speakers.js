@@ -106,16 +106,19 @@ async function transfer(entity,target){
 async function removeMember(chime,row){const last=chime.members.length===1;if(last&&!await confirmChimeAction('Remove chime?', 'Remove this speaker and its chime? Any existing doorbell pairing will also be removed.'))return;await mutate('chimes/members',{action:'remove',key:chime.key,entity_id:row.entity_id,confirm_last:last});}
 function openAddMember(key){addTarget=key;const select=$('add-member-choice');select.replaceChildren();const target=chimes.find(c=>c.key===key);const choices=rows.filter(r=>r.available&&!target?.members?.includes(r.entity_id));for(const row of choices){const option=document.createElement('option');option.value=row.entity_id;const owner=chimes.find(c=>c.active&&c.members?.includes(row.entity_id));option.textContent=row.name+(owner?' (in '+owner.name+')':'');select.append(option);}if(!choices.length){const option=document.createElement('option');option.textContent='No other online speakers available';option.disabled=true;select.append(option);}$('add-member-confirm').disabled=!choices.length;$('add-member-dialog').showModal();}
 $('add-member-close').onclick=()=>$('add-member-dialog').close();$('add-member-confirm').onclick=()=>{const entity=$('add-member-choice').value;$('add-member-dialog').close();if(entity)void transfer(entity,addTarget);};
-function openChimeActions(chime,anchor){actionChime=chime;const live=nativeStates.get(chime.key);$('chime-action-title').textContent=chime.name;const configured=live?.protect_configured===true;$('chime-test').hidden=!configured;$('test-volume-control').hidden=!configured;$('test-volume').value='10';$('test-volume-value').textContent='10%';$('chime-test').disabled=mutationBusy||!live?.connected||!live?.adopted||!managementReady||!!chime.migration_hold||!!chime.removal_pending;$('chime-timing').hidden=chime.members.length<2;$('chime-timing').disabled=mutationBusy||!!chime.migration_hold||!!chime.removal_pending;$('chime-remove').disabled=mutationBusy;showMessage('chime-action-help',!managementReady?'Testing requires a local Protect account in the HA app Configuration tab. Removing speakers is always available.':!configured?'Configure the doorbell and chime in Protect to enable testing. You can remove it at any stage.':!live?.connected||!live?.adopted?'This chime is offline. Testing becomes available when it reconnects. You can remove it at any stage.':'Test volume applies only to this request. Announcement volume and music restoration depend on the integration.');const dialog=$('chime-actions'),box=dialogHost?.anchor(anchor.getBoundingClientRect())||anchor.getBoundingClientRect(),host=dialog.ownerDocument.defaultView;const scroll={x:scrollX,y:scrollY,hostX:host.scrollX,hostY:host.scrollY};dialog.style.top='12px';dialog.style.left='12px';if(!dialog.open)dialogHost.showMenu(dialog);window.scrollTo(scroll.x,scroll.y);if(host!==window)host.scrollTo(scroll.hostX,scroll.hostY);placeChimeMenu(box);(configured?$('test-volume'):$('chime-remove')).focus({preventScroll:true});}
-function placeChimeMenu(anchor=null){
- const dialog=$('chime-actions');if(!dialog.open)return;
- const host=dialog.ownerDocument.defaultView,view=host.visualViewport,left=view?.offsetLeft||0,top=view?.offsetTop||0,width=view?.width||host.innerWidth,height=view?.height||host.innerHeight;
+function openChimeActions(chime,anchor){actionChime=chime;const live=nativeStates.get(chime.key);$('chime-action-title').textContent=chime.name;const configured=live?.protect_configured===true;$('chime-test').hidden=!configured;$('test-volume-control').hidden=!configured;$('test-volume').value='10';$('test-volume-value').textContent='10%';$('chime-test').disabled=mutationBusy||!live?.connected||!live?.adopted||!managementReady||!!chime.migration_hold||!!chime.removal_pending;$('chime-timing').hidden=chime.members.length<2;$('chime-timing').disabled=mutationBusy||!!chime.migration_hold||!!chime.removal_pending;$('chime-remove').disabled=mutationBusy;showMessage('chime-action-help',!managementReady?'Testing requires a local Protect account in the HA app Configuration tab. Removing speakers is always available.':!configured?'Configure the doorbell and chime in Protect to enable testing. You can remove it at any stage.':!live?.connected||!live?.adopted?'This chime is offline. Testing becomes available when it reconnects. You can remove it at any stage.':'Test volume applies only to this request. Announcement volume and music restoration depend on the integration.');const dialog=$('chime-actions'),box=anchor.getBoundingClientRect(),scroll={x:scrollX,y:scrollY};menuAnchor=anchor;dialog.style.top=(box.bottom+6+scrollY)+'px';dialog.style.left=(Math.max(12,box.right-280)+scrollX)+'px';if(!dialog.open)dialog.show();window.scrollTo(scroll.x,scroll.y);placeChimeMenu();(configured?$('test-volume'):$('chime-remove')).focus({preventScroll:true});}
+// The menu stays in this document and is placed in page coordinates, so it scrolls
+// together with its ⋯ button instead of floating over other chimes.
+function placeChimeMenu(){
+ const dialog=$('chime-actions');if(!dialog.open||!menuAnchor?.isConnected)return;
+ const view=window.visualViewport,left=view?.offsetLeft||0,top=view?.offsetTop||0,width=view?.width||innerWidth,height=view?.height||innerHeight;
  dialog.style.maxWidth=Math.max(0,width-24)+'px';dialog.style.maxHeight=Math.max(0,height-24)+'px';
- const rect=dialog.getBoundingClientRect();
- dialog.style.left=Math.max(left+12,Math.min(left+width-rect.width-12,anchor?anchor.right-rect.width:rect.left))+'px';
- dialog.style.top=Math.max(top+12,Math.min(top+height-rect.height-12,anchor?anchor.bottom+6:rect.top))+'px';
+ const anchor=menuAnchor.getBoundingClientRect(),rect=dialog.getBoundingClientRect(),below=anchor.bottom+6,above=anchor.top-6-rect.height;
+ const x=Math.max(left+12,Math.min(left+width-rect.width-12,anchor.right-rect.width));
+ const y=below+rect.height>top+height-12&&above>=top+12?above:below;
+ dialog.style.left=(x+scrollX)+'px';dialog.style.top=(y+scrollY)+'px';
 }
-const chimeMenu=$('chime-actions');let outsideMenuPointer=null;
+const chimeMenu=$('chime-actions');let outsideMenuPointer=null,menuAnchor=null;
 const menuEvents={
  pointerdown(event){
   outsideMenuPointer=null;if(!chimeMenu.open||$('confirm-action-dialog').open)return;
@@ -129,11 +132,10 @@ const menuEvents={
  scroll(){if(outsideMenuPointer)outsideMenuPointer.moved=true;},
  keydown(event){if(event.key==='Escape'&&chimeMenu.open&&!$('confirm-action-dialog').open){event.preventDefault();chimeMenu.close();}}
 };
-chimeMenu.addEventListener('close',()=>{outsideMenuPointer=null;render();document.querySelector('[data-chime-key="'+actionChime?.key+'"]')?.focus({preventScroll:true});});
+chimeMenu.addEventListener('close',()=>{outsideMenuPointer=null;menuAnchor=null;render();document.querySelector('[data-chime-key="'+actionChime?.key+'"]')?.focus({preventScroll:true});});
 if(typeof ResizeObserver!=='undefined')new ResizeObserver(()=>placeChimeMenu()).observe(chimeMenu);
 window.addEventListener('resize',()=>placeChimeMenu());
 window.visualViewport?.addEventListener('resize',()=>placeChimeMenu());
-window.visualViewport?.addEventListener('scroll',()=>placeChimeMenu());
 $('test-volume').oninput=()=>{$('test-volume-value').textContent=$('test-volume').value+'%';};
 $('chime-test').onclick=async()=>{const key=actionChime?.key;if(!key)return;$('chime-test').disabled=true;showMessage('chime-action-help','Requesting a test chime…');try{const d=await api('chimes/test',{key,confirmed:true,volume:Number($('test-volume').value)});showMessage('chime-action-help',d.muted?'Muted; no playback requested.':'Test requested at '+d.volume+'%.');}catch(e){showMessage('chime-action-help',e.message,true);}finally{if($('chime-actions').open&&actionChime?.key===key)$('chime-test').disabled=false;}};
 $('chime-timing').onclick=()=>{const chime=actionChime;$('chime-actions').close();void openTiming(chime.key);};
@@ -184,5 +186,5 @@ $('trust-certificate').onclick=async()=>{$('trust-certificate').disabled=true;sh
 try{const d=await api('connection/trust',{confirmation_token:certificateToken});certificateToken=null;connectionRestartPending=true;$('check-connection').hidden=true;$('certificate-candidate').hidden=true;$('protect-address').textContent='Protect · '+d.controller_ip;$('protect-address').hidden=false;showMessage('certificate-feedback','Connection saved. Restart AnyChime from its Home Assistant app page to apply it.');}
 catch(e){showMessage('certificate-feedback',e.message,true);}finally{$('trust-certificate').disabled=false;}};
 try{viewMode=localStorage.getItem('anychime-speaker-view')||'list';}catch{}
-dialogHost=new AnyChimeDialogHost(document,['chime-actions','confirm-action-dialog'],()=>placeChimeMenu(),menuEvents);
+dialogHost=new AnyChimeDialogHost(document,['confirm-action-dialog'],()=>placeChimeMenu(),menuEvents);
 setView(viewMode);void status();setInterval(status,10000);

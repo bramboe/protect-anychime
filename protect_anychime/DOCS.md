@@ -63,7 +63,7 @@ Switching between a local app and a GitHub repository app can also change HA's a
 
 ## Compact chime cards and action feedback
 
-The chime actions menu stays fixed in the viewport while the page scrolls. Clicking outside or pressing Escape closes it; scrolling leaves it open.
+The chime actions menu stays attached to its ⋯ button and scrolls with the page. It opens below the button, or above it when there is not enough room. Clicking outside or pressing Escape closes it; scrolling leaves it open.
 
 Adding or moving a speaker opens the receiving chime so its new membership is visible. Chime cards start collapsed on every page load, return visit and restored page. Only the title, expansion arrow and actions menu remain visible. Expand/collapse choices stay in memory through background status polls; they are not stored as a preference. A collapsed heading accepts dragged speakers. **Add speaker** also offers online speakers already assigned to another chime. Moving its last speaker requires an in-app confirmation explaining that the empty source is removed while the destination keeps its identity, pairing, ringtones and settings. HA music groups remain unchanged.
 
@@ -73,7 +73,7 @@ Actions show immediate progress, prevent duplicate submissions, and report compl
 
 Console certificate confirmation authorizes the native chime connection; the local Protect account in HA app Configuration authorizes management operations. Both are required for automatic adoption. Temporary rate limits, network failures and server errors retry with backoff without consuming the three adoption attempts. A rate limit pauses adoption across all chimes and defers configuration polling during the cooldown.
 
-Explicit management actions log their operation, failure category and HTTP status without account details or request bodies. An upstream test failure does not necessarily mean playback was not started; sound tests are never automatically retried. The chime menu uses the browser top layer when available, without making the underlying page inert or preventing scrolling.
+Explicit management actions log their operation, failure category and HTTP status without account details or request bodies. An upstream test failure does not necessarily mean playback was not started; sound tests are never automatically retried. The chime menu is a non-modal panel inside the app page, so the underlying page stays usable and scrollable. Removal confirmations are shown centred over Home Assistant.
 
 While the app is open, confirmed Protect removals, adoption, doorbell configuration and sound-setting changes appear as notifications. Removals arrive through the native connection; configuration changes appear after a successful management poll. Initial observations, page revisits and bridge restarts do not replay old events. Notifications are held only in bounded runtime memory.
 

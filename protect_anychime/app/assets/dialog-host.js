@@ -1,27 +1,17 @@
-/* Keep floating dialogs in the outer viewport rather than a scrolling iframe. */
+/* Show modal confirmations in the outer HA viewport rather than a scrolling iframe,
+   and listen for outside clicks in every document between the app and HA.
+   The chime menu is not hosted here: it stays in the app document so it scrolls
+   together with its trigger button. */
 class AnyChimeDialogHost {
   constructor(source, ids, onViewport, events={}) {
     this.source=source;this.nodes=ids.map(id=>source.getElementById(id)).filter(Boolean);
     this.style=source.querySelector('style')?.textContent||'';this.onViewport=onViewport;
     this.root=source;this.host=null;this.target=source;this.events=events;this.documents=[];
-    for(const node of this.nodes)node.addEventListener('close',()=>{
-      if(!node.open&&typeof node.hidePopover==='function'&&node.matches(':popover-open'))node.hidePopover();
-    });
     this.mount();
     source.defaultView.addEventListener('pagehide',()=>this.release());
     source.defaultView.addEventListener('pageshow',()=>this.mount());
   }
   find(id) {return this.root.getElementById(id);}
-  showMenu(node) {
-    if(node.open)return;
-    node.show();
-    // The browser top layer avoids Safari scroll-container painting and stacking
-    // issues while remaining non-modal: the underlying page can still scroll.
-    if(typeof node.showPopover==='function'){
-      try {node.popover='manual';node.showPopover();}
-      catch {node.removeAttribute('popover');}
-    }
-  }
   mount() {
     if(this.host?.isConnected)return;
     const view=this.source.defaultView;let target=this.source;
@@ -53,14 +43,5 @@ class AnyChimeDialogHost {
       this.target.defaultView.visualViewport?.removeEventListener('resize',this.onViewport);
       this.target.defaultView.visualViewport?.removeEventListener('scroll',this.onViewport);
     }
-  }
-  anchor(rect) {
-    let box={left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom},view=this.source.defaultView;
-    try {while(view!==this.target.defaultView){
-      const frame=view.frameElement;if(!frame)break;
-      const parent=frame.getBoundingClientRect(),sx=frame.offsetWidth?parent.width/frame.offsetWidth:1,sy=frame.offsetHeight?parent.height/frame.offsetHeight:1;
-      box={left:parent.left+(frame.clientLeft+box.left)*sx,right:parent.left+(frame.clientLeft+box.right)*sx,top:parent.top+(frame.clientTop+box.top)*sy,bottom:parent.top+(frame.clientTop+box.bottom)*sy};view=view.parent;
-    }} catch {}
-    return box;
   }
 }
