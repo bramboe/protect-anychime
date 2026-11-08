@@ -72,6 +72,53 @@ class NativeDeviceFilterTests(unittest.TestCase):
         self.assertEqual(payload['selected'],['media_player.speaker_a'])
         self.assertEqual(len(payload['speakers']),1)
 
+class AppleHomeFilterTests(unittest.TestCase):
+    def test_apple_tv_and_homepod_are_hidden_by_model_or_identifier(self):
+        for model,model_id in [('Apple TV 4K (gen 3)',''),('Apple TV 4',''),('A1625',''),('HomePod Mini',''),
+                               ('HomePod',''),('','AppleTV11,1'),('','AudioAccessory5,1')]:
+            with self.subTest(model=model,model_id=model_id):
+                request=Mock(return_value=[dict(row(),manufacturer='Apple Inc.',model=model,model_id=model_id,integration='apple_tv')])
+                self.assertEqual(speakers.discover(request),[])
+                hidden=speakers.discover(request,include_excluded=True)[0]
+                self.assertTrue(hidden['excluded']);self.assertIn('Apple Home',hidden['exclusion_reason'])
+
+    def test_other_apple_devices_and_names_do_not_filter(self):
+        for maker,model,name in [('Apple','MacBook Pro','Office'),('Apple','AirPort Express','Kitchen'),
+                                 ('Sonos','Era 300','Apple TV'),('','','HomePod'),('Apple','','Living Room')]:
+            with self.subTest(maker=maker,model=model,name=name):
+                request=Mock(return_value=[dict(row(),manufacturer=maker,model=model,name=name)])
+                self.assertEqual(len(speakers.discover(request)),1)
+
+    def test_paired_apple_tv_stays_visible_as_not_supported_and_cannot_be_added_again(self):
+        tv='media_player.apple_tv'
+        inventory=speakers.discover(Mock(return_value=[dict(row(tv),manufacturer='Apple',model='Apple TV 4K'),row()]),include_excluded=True)
+        rows,selected=speakers.selection_inventory(inventory,[tv],[{'active':True,'entity_id':tv,'members':[tv]}])
+        self.assertEqual(selected,[tv])
+        paired=next(r for r in rows if r['entity_id']==tv)
+        self.assertTrue(paired['available']);self.assertFalse(paired['supported'])
+        self.assertIn('Apple Home',paired['unsupported_reason'])
+        with self.assertRaises(ValueError):speakers.validate_selection([tv],rows)
+        self.assertEqual(speakers.validate_selection([tv],rows,existing=[tv]),[tv])
+        offline=speakers.discover(Mock(return_value=[dict(row(tv),manufacturer='Apple',model='Apple TV 4K',state='unavailable')]),include_excluded=True)
+        self.assertFalse(speakers.selection_inventory(offline,[tv],[{'active':True,'entity_id':tv,'members':[tv]}])[0][0]['available'])
+
+    def test_paired_apple_tv_keeps_its_chime_connected(self):
+        from registry import ChimeRegistry
+        tv='media_player.apple_tv'
+        inventory=speakers.discover(Mock(return_value=[dict(row(),state='idle'),dict(row(tv),manufacturer='Apple',model='Apple TV 4K',state='idle')]),include_excluded=True)
+        with tempfile.TemporaryDirectory() as directory:
+            registry=ChimeRegistry(directory)
+            registry.transfer(tv,None,[dict(r,excluded=False) for r in inventory])
+            rows,selected=speakers.selection_inventory(inventory,registry.selected_entities(),registry.snapshot())
+            entry=next(e for e in registry.sync(selected,rows,user_change=False) if e['active'])
+        self.assertEqual(entry['members'],[tv]);self.assertTrue(entry['speaker_available'])
+
+    def test_unrelated_exclusions_keep_the_offline_label(self):
+        missing='media_player.missing'
+        rows,_=speakers.selection_inventory([dict(row(missing),excluded=True,exclusion_reason='Audio playback capability could not be determined.')],
+                                            [missing],[{'active':True,'entity_id':missing,'members':[missing]}])
+        self.assertNotIn('unsupported_reason',rows[0])
+
 class CapabilityFilterTests(unittest.TestCase):
     def test_webos_route_hidden_but_same_tv_dlna_route_retained(self):
         request=Mock(return_value=[dict(row('media_player.tv'),integration='webostv',model='OLED42C31LA'),

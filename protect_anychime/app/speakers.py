@@ -42,9 +42,25 @@ def is_unifi_device(row):
     return bool(re.fullmatch(r'(?:ubiquiti(?:networks)?|unifi)(?:incorporated|inc|ltd|llc|corp|corporation)?', maker))
 
 
+# Apple TV and HomePod model names ("Apple TV 4K", "HomePod mini") and
+# hardware identifiers ("AppleTV11,1", "AudioAccessory5,1"; A1625 is the Apple TV HD).
+APPLE_HOME_MODEL = re.compile(r'(?:apple)?(?:tv|homepod|audioaccessory)[a-z0-9]*|a1625')
+APPLE_HOME_REASON = ('Apple TV and HomePod show doorbell rings through Apple Home. '
+                     'A chime played here would interrupt what is playing.')
+
+
+def is_apple_home_device(row):
+    # Match device registry metadata, never a user-editable speaker name.
+    if artwork.manufacturer(row.get('manufacturer')) != 'apple':
+        return False
+    return any(APPLE_HOME_MODEL.fullmatch(artwork.normalized(row.get(key))) for key in ('model', 'model_id'))
+
+
 def exclusion_reason(row):
     if is_unifi_device(row) or row.get('integration') == 'unifiprotect':
         return 'Native UniFi devices do not need AnyChime.'
+    if is_apple_home_device(row):
+        return APPLE_HOME_REASON
     if row.get('integration') == 'webostv':
         return 'This integration supports channel playback, not chime audio URLs.'
     features = row.get('features')
@@ -107,6 +123,9 @@ def selection_inventory(inventory, selected, entries=()):
             entry=saved.get(entity,{})
             row={**original.get(entity,{}),'entity_id':entity,'name':original.get(entity,{}).get('name',entity),
                  'available':False,'supported':False,'group':entry.get('members',[])}
+            if row.get('exclusion_reason')==APPLE_HOME_REASON:
+                # Paired by an older version: keep it ringing until the user removes it.
+                row.update(available=original[entity].get('available',False),unsupported_reason=APPLE_HOME_REASON)
             rows.append(row)
     return rows,selected
 

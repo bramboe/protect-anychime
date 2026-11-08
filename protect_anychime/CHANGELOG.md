@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.10
+
+- Stop offering Apple TV and HomePod as chime speakers. They show doorbell rings themselves when the doorbell is in Apple Home: Apple TV shows the camera in a corner of the screen, HomePod plays the doorbell sound. A chime sent from Home Assistant would play over AirPlay and interrupt what is playing. Matched on the device's manufacturer and model, never on its name.
+- An Apple TV or HomePod already in a chime stays there and keeps ringing, now marked **Not supported** with the reason, so you can remove it yourself.
+
 ## 0.5.9
 
 - Add a clear disclaimer: Protect AnyChime is an independent community project, not affiliated with or endorsed by Ubiquiti Inc.; UniFi, UniFi Protect, Ubiquiti and their logos, icons and product images are Ubiquiti's trademarks or other intellectual property, used only to identify compatible products. Shown in the README, the app's Home Assistant page, the artwork notes and the footer of the web interface.

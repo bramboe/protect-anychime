@@ -14,7 +14,8 @@ class ArtworkTests(unittest.TestCase):
                 self.assertFalse(match['image_is_fallback'])
         row={'entity_id':'media_player.tv','name':'Media Player B',
             'manufacturer':'Apple','model':'Apple TV 4','features':512,'state':'unavailable'}
-        result=speakers.discover(Mock(return_value=[row]))[0]
+        # Not offered as a chime speaker any more, but a paired one keeps its artwork.
+        result=speakers.discover(Mock(return_value=[row]),include_excluded=True)[0]
         self.assertEqual(result['image'],'assets/unifi-14.png')
         self.assertFalse(result['available'])
         for field in ['name','model','manufacturer']:
